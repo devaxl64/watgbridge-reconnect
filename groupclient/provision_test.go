@@ -46,3 +46,20 @@ func TestHumanContactName(t *testing.T) {
 		t.Fatal("actual contact name not accepted")
 	}
 }
+
+func TestLegacyNumericGroupTitleOnly(t *testing.T) {
+	for _, tc := range []struct{title string; want bool}{
+		{"15557420242",true},
+		{"+15557420242",true},
+		{"João (+15557420242)",false},
+		{"Grupo da família",false},
+	} {
+		if got:=isLegacyNumericTitle(tc.title,"15557420242");got!=tc.want {
+			t.Errorf("isLegacyNumericTitle(%q): got %t, want %t",tc.title,got,tc.want)
+		}
+	}
+}
+func TestChatTitlePreservesAlreadyFormattedContact(t *testing.T) {
+	c := database.KnownChat{WaChatID:"5511999999999@s.whatsapp.net",Name:"João (+5511999999999)",Kind:"private"}
+	if got:=chatTitle(c);got!="João (+5511999999999)"{t.Fatalf("unexpected duplicated suffix: %s",got)}
+}
