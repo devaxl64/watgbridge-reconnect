@@ -71,7 +71,8 @@ func (bc *bridgeContext) sendFallbackText(extraText string) {
 // videos simultaneously would crash the process.
 var mediaTransferSlot = make(chan struct{}, 1)
 var mediaTransferBudget transfer.Limiter
-const maxMediaInRAM int64 = 48 * 1024 * 1024
+// Only sticker conversions still require bytes in memory; cap them hard.
+const maxMediaInRAM int64 = 8 * 1024 * 1024
 
 // downloadMedia returns a release callback that MUST run after the Telegram
 // upload (not immediately after WhatsApp download) so byte buffers cannot
