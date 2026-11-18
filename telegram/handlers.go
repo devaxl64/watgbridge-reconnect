@@ -760,7 +760,7 @@ var phonePairingActive atomic.Bool
 // The pairing phone number is provided only in a PRIVATE bot chat.
 func PairWhatsAppByPhoneCodeHandler(b *gotgbot.Bot, c *ext.Context) error {
 	cfg := state.State.Config
-	if c.EffectiveSender.User == nil ||
+	if c.EffectiveSender == nil || c.EffectiveSender.User == nil ||
 		c.EffectiveSender.User.Id != cfg.Telegram.OwnerID ||
 		c.EffectiveChat == nil ||
 		c.EffectiveChat.Id != cfg.Telegram.OwnerID {
@@ -794,6 +794,11 @@ func PairWhatsAppByPhoneCodeHandler(b *gotgbot.Bot, c *ext.Context) error {
 		_, err := utils.TgReplyTextByContext(b, c,
 			"Já existe uma sessão vinculada. Use /status ou /reconectar.", nil, false)
 		return err
+	}
+	// An expired pairing attempt may have left an unauthenticated socket open.
+	// Reconnect cleanly before requesting a new QR stream.
+	if client.IsConnected() {
+		client.Disconnect()
 	}
 	if !phonePairingActive.CompareAndSwap(false, true) {
 		_, err := utils.TgReplyTextByContext(b, c,
