@@ -134,12 +134,24 @@ func SetKnownAvatarVersion(waChatID, pictureID string) error {
 		}).Error
 }
 
-// ListAllKnownChats returns a bounded batch in a stable order for MTProto
-// provisioning. It does not expose historical messages or media.
-func ListAllKnownChats(limit int) ([]KnownChat,error) {
-	if state.State.Database==nil {return nil,errors.New("bridge database unavailable")}
-	if limit<=0||limit>5000 {limit=5000}
+// ListKnownChatsPage lists any page of the catalog without excluding chats from recovery.
+func ListKnownChatsPage(page, pageSize int) ([]KnownChat, error) {
+	if state.State.Database == nil { return nil, errors.New("bridge database is not ready") }
+	if page < 1 { page = 1 }
+	if pageSize < 1 || pageSize > 50 { pageSize = 20 }
+	var chats []KnownChat
+	err := state.State.Database.Order("seen_at DESC").Order("wa_chat_id ASC").
+		Offset((page - 1) * pageSize).Limit(pageSize).Find(&chats).Error
+	return chats, err
+}
+
+// ListAllKnownChats lists all discovered chats if limit <= 0.
+// Historical messages and media are not included.
+func ListAllKnownChats(limit int) ([]KnownChat, error) {
+	if state.State.Database == nil { return nil, errors.New("bridge database unavailable") }
+	query := state.State.Database.Order("wa_chat_id ASC")
+	if limit > 0 { query = query.Limit(limit) }
 	var out []KnownChat
-	err:=state.State.Database.Order("wa_chat_id ASC").Limit(limit).Find(&out).Error
-	return out,err
+	err := query.Find(&out).Error
+	return out, err
 }
