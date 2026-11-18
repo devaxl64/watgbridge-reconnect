@@ -114,6 +114,10 @@ func AddTelegramHandlers() {
 			"Revoke a message from WhatsApp",
 		},
 		waTgBridgeCommand{
+			handlers.NewCommand("apagar", RevokeCommandHandler),
+			"Apagar para todos no WhatsApp (responda à mensagem)",
+		},
+		waTgBridgeCommand{
 			handlers.NewCommand("synccontacts", SyncContactsHandler),
 			"Try to sync the contacts list from WhatsApp",
 		},
@@ -1482,15 +1486,29 @@ func RevokeCommandHandler(b *gotgbot.Bot, c *ext.Context) error {
 	if err != nil {
 		return utils.TgReplyWithErrorByContext(b, c, "failed to retrieve WhatsApp side IDs", err)
 	}
-
-	chatJid, _ := utils.WaParseJID(waChatId)
+	if waMsgId == "" || waChatId == "" {
+		_, replyErr := utils.TgReplyTextByContext(b, c,
+			"Essa mensagem não tem vínculo com o WhatsApp. Não posso apagá-la de lá.", nil, false)
+		return replyErr
+	}
+	chatJid, valid := utils.WaParseJID(waChatId)
+	if !valid {
+		_, replyErr := utils.TgReplyTextByContext(b, c, "Conversa inválida para exclusão.", nil, false)
+		return replyErr
+	}
 	revokeMessage := waClient.BuildRevoke(chatJid, waTypes.EmptyJID, waMsgId)
 	_, err = waClient.SendMessage(context.Background(), chatJid, revokeMessage)
 	if err != nil {
 		return utils.TgReplyWithErrorByContext(b, c, "failed to revoke message", err)
 	}
 
-	_, err = utils.TgReplyTextByContext(b, c, "<i>Successfully revoked</i>", nil, false)
+	if state.State.Config.Telegram.SeparateChats {
+		// The bot can only remove Telegram messages within Telegram's own
+		// deletion window. The WhatsApp server may also reject old revokes.
+		_, _ = b.DeleteMessage(chatId, msgToRevoke.MessageId, nil)
+	}
+	_, err = utils.TgReplyTextByContext(b, c,
+		"Solicitação para apagar a mensagem enviada ao WhatsApp.", nil, false)
 	return err
 }
 
