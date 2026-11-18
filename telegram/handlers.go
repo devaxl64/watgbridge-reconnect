@@ -82,6 +82,22 @@ func AddTelegramHandlers() {
 			"Ver conversas do WhatsApp identificadas pela sincronização",
 		},
 		waTgBridgeCommand{
+			handlers.NewCommand("tgstatus", TelegramUserStatusHandler),
+			"Estado da sua sessão Telegram para criação de grupos",
+		},
+		waTgBridgeCommand{
+			handlers.NewCommand("tglogin", TelegramUserLoginHandler),
+			"Conectar conta Telegram para criação automática de grupos",
+		},
+		waTgBridgeCommand{
+			handlers.NewCommand("tgcodigo", TelegramUserCodeHandler),
+			"Informar código de vinculação do Telegram no privado",
+		},
+		waTgBridgeCommand{
+			handlers.NewCommand("criarchats", SyncDedicatedGroupsHandler),
+			"Recuperar grupos ou criar até 5 grupos separados por vez",
+		},
+		waTgBridgeCommand{
 			handlers.NewCommand("vincular", LinkDedicatedGroupHandler),
 			"Vincular grupo Telegram a uma conversa WhatsApp (teste)",
 		},
