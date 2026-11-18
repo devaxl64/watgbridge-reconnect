@@ -168,6 +168,14 @@
 8. **NÃO publicar a branch de trabalho** sem aprovação dos testes de compilação e sem planejar a migração do serviço existente.
 
 
+## Importação automática de todas as conversas após login/restauração
+
+**Requisito:** não esperar cada contato enviar mensagem para aparecer na lista do Telegram. Na primeira vinculação, aproveitar os eventos de sincronização inicial do WhatsApp (`events.HistorySync`) para descobrir conversas individuais **inclusive não salvas nos contatos**, e os grupos. Coletar **apenas metadados** de chats (JID/LID, número quando possível, nome, tipo, foto), sem importar todo o histórico de mensagens nem mídia antiga.
+
+Na restauração de sessão existente, **não assumir que o WhatsApp enviará a lista inteira novamente**, pois a sincronização inicial pode ocorrer apenas no primeiro pareamento. Primeiro reconstruir a lista com os vínculos/registro permanente no próprio Telegram; completar com dados do cliente WhatsApp e conversas identificadas por novos eventos. Não apagar chats existentes nem criar duplicados quando faltarem dados. Se a lista estiver incompleta, não prometer 100% de recuperação imediata. Testar também contas que têm muitas conversas.
+
+Após compor a lista, criar/reutilizar grupos de Telegram em lotes controlados para evitar limites de requisição, com associação única e nomes/fotos conforme especificação. **Implementação futura na PR de conversas separadas**; a PR de backup de sessão apenas recupera autenticação/bancos, não cria os grupos.
+
 ## Andamento
 
 - [x] Fork de trabalho criado.
