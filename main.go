@@ -242,7 +242,9 @@ func main() {
 	// Periodically re-discover all Telegram groups from their encrypted
 	// descriptions. No new groups by default until the owner authorizes it.
 	if cfg.Telegram.SeparateChats && userClient != nil {
-		autoCreate := 0
+		// Separate-chat mode gradually creates all missing groups, one per sync cycle.
+		// Set WATG_AUTOCREATE_BATCH=0 to pause creating new groups.
+		autoCreate := 1
 		if raw := os.Getenv("WATG_AUTOCREATE_BATCH"); raw != "" {
 			count, parseErr := strconv.Atoi(raw)
 			if parseErr == nil && count >= 0 && count <= 5 {
