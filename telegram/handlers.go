@@ -13,6 +13,7 @@ import (
 	"path"
 	"strings"
 	"syscall"
+	"sync/atomic"
 	"time"
 
 	"watgbridge/database"
@@ -100,6 +101,18 @@ func AddTelegramHandlers() {
 		waTgBridgeCommand{
 			handlers.NewCommand("newqr", NewQRHandler),
 			"Log out of WhatsApp and send a new QR code to pair again",
+		},
+		waTgBridgeCommand{
+			handlers.NewCommand("codigo", PairWhatsAppByPhoneCodeHandler),
+			"Vincular WhatsApp usando código no celular (DM privado)",
+		},
+		waTgBridgeCommand{
+			handlers.NewCommand("status", WhatsAppConnectionStatusHandler),
+			"Verificar conexão do WhatsApp",
+		},
+		waTgBridgeCommand{
+			handlers.NewCommand("reconectar", ReconnectWhatsAppHandler),
+			"Reconectar a sessão do WhatsApp sem gerar QR",
 		},
 		waTgBridgeCommand{
 			handlers.NewCommand("joininvitelink", JoinInviteLinkHandler),
@@ -734,6 +747,150 @@ func ClearMessageIdPairsHistoryHandler(b *gotgbot.Bot, c *ext.Context) error {
 	}
 
 	_, err = utils.TgReplyTextByContext(b, c, "Successfully deleted all the stored pairs", nil, false)
+	return err
+}
+
+
+// phonePairingActive prevents multiple pairing codes from invalidating each
+// other if the owner taps the command repeatedly.
+var phonePairingActive atomic.Bool
+
+// PairWhatsAppByPhoneCodeHandler lets the owner relink from ONE smartphone.
+// It is available when the bridge booted without a recoverable session.
+// The pairing phone number is provided only in a PRIVATE bot chat.
+func PairWhatsAppByPhoneCodeHandler(b *gotgbot.Bot, c *ext.Context) error {
+	cfg := state.State.Config
+	if c.EffectiveSender.User == nil ||
+		c.EffectiveSender.User.Id != cfg.Telegram.OwnerID ||
+		c.EffectiveChat == nil ||
+		c.EffectiveChat.Id != cfg.Telegram.OwnerID {
+		return nil
+	}
+	args := c.Args()
+	if len(args) != 2 {
+		_, err := utils.TgReplyTextByContext(b, c,
+			"Uso: <code>/codigo 55DDDNÚMERO</code> (somente números, com DDI 55).", nil, false)
+		return err
+	}
+	phone := strings.TrimPrefix(args[1], "+")
+	if len(phone) < 10 || len(phone) > 15 {
+		_, err := utils.TgReplyTextByContext(b, c,
+			"Número inválido. Envie o número com DDI 55 e DDD.", nil, false)
+		return err
+	}
+	for _, digit := range phone {
+		if digit < '0' || digit > '9' {
+			_, err := utils.TgReplyTextByContext(b, c,
+				"Use apenas números, sem espaços ou pontuação.", nil, false)
+			return err
+		}
+	}
+	client := state.State.WhatsAppClient
+	if client == nil || client.Store == nil {
+		return utils.TgReplyWithErrorByContext(b, c, "Cliente WhatsApp indisponível",
+			errors.New("inicialização pendente"))
+	}
+	if client.Store.ID != nil {
+		_, err := utils.TgReplyTextByContext(b, c,
+			"Já existe uma sessão vinculada. Use /status ou /reconectar.", nil, false)
+		return err
+	}
+	if !phonePairingActive.CompareAndSwap(false, true) {
+		_, err := utils.TgReplyTextByContext(b, c,
+			"Já há um código de vinculação ativo. Aguarde sua expiração.", nil, false)
+		return err
+	}
+
+	// The QR code stream must be drained for PairPhone to work, but QR images
+	// are NOT sent to Telegram, preventing the previous QR flood.
+	pairCtx, pairCancel := context.WithTimeout(context.Background(), 170*time.Second)
+	qrChan, err := client.GetQRChannel(pairCtx)
+	if err != nil {
+		pairCancel()
+		phonePairingActive.Store(false)
+		return utils.TgReplyWithErrorByContext(b, c, "Não foi possível preparar a vinculação", err)
+	}
+	ready := make(chan struct{}, 1)
+	go func() {
+		defer phonePairingActive.Store(false)
+		defer pairCancel()
+		firstQR := false
+		for evt := range qrChan {
+			if evt.Event == whatsmeow.QRChannelEventCode && !firstQR {
+				firstQR = true
+				ready <- struct{}{}
+			}
+		}
+	}()
+	if err = client.Connect(); err != nil {
+		pairCancel()
+		phonePairingActive.Store(false)
+		return utils.TgReplyWithErrorByContext(b, c, "Falha ao iniciar conexão", err)
+	}
+	select {
+	case <-ready:
+	case <-time.After(25 * time.Second):
+		pairCancel()
+		phonePairingActive.Store(false)
+		return utils.TgReplyWithErrorByContext(b, c, "Tempo esgotado aguardando WhatsApp",
+			errors.New("tente novamente em alguns instantes"))
+	}
+	requestCtx, requestCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	code, err := client.PairPhone(requestCtx, phone, true, whatsmeow.PairClientChrome, "Chrome (Linux)")
+	requestCancel()
+	if err != nil {
+		pairCancel()
+		phonePairingActive.Store(false)
+		return utils.TgReplyWithErrorByContext(b, c, "Falha ao gerar código de vinculação", err)
+	}
+	message := "Código de vinculação: <code>" + html.EscapeString(code) + "</code>\n\n" +
+		"WhatsApp (conta principal) → Dispositivos conectados → Conectar dispositivo " +
+		"→ Conectar com número de telefone → Digite o código.\n\n" +
+		"O código expira. Não compartilhe este código."
+	_, err = utils.TgReplyTextByContext(b, c, message, nil, false)
+	return err
+}
+
+// WhatsAppConnectionStatusHandler reports live status without creating a
+// connection attempt or forcing a new login.
+func WhatsAppConnectionStatusHandler(b *gotgbot.Bot, c *ext.Context) error {
+	if !utils.TgUpdateIsAuthorized(b, c) {
+		return nil
+	}
+	client := state.State.WhatsAppClient
+	status := "WhatsApp desconectado. Use /codigo 55DDDNÚMERO no privado do bot se a sessão foi perdida."
+	if client != nil && client.IsLoggedIn() {
+		status = "WhatsApp conectado e autenticado."
+	} else if client != nil && client.Store != nil && client.Store.ID != nil {
+		status = "A sessão existe, mas a conexão está inativa. Use /reconectar."
+	}
+	_, err := utils.TgReplyTextByContext(b, c, status, nil, false)
+	return err
+}
+
+// ReconnectWhatsAppHandler only reconnects an EXISTING valid device, without
+// deleting session files or sending repeated pairing QR images.
+func ReconnectWhatsAppHandler(b *gotgbot.Bot, c *ext.Context) error {
+	if !utils.TgUpdateIsAuthorized(b, c) {
+		return nil
+	}
+	client := state.State.WhatsAppClient
+	if client == nil || client.Store == nil || client.Store.ID == nil {
+		_, err := utils.TgReplyTextByContext(b, c,
+			"Sem sessão local. Abra o privado do bot e use /codigo 55DDDNÚMERO.", nil, false)
+		return err
+	}
+	if client.IsLoggedIn() {
+		_, err := utils.TgReplyTextByContext(b, c,
+			"O WhatsApp já está conectado.", nil, false)
+		return err
+	}
+	client.Disconnect()
+	if err := client.Connect(); err != nil {
+		return utils.TgReplyWithErrorByContext(b, c, "Não foi possível reconectar", err)
+	}
+	_, err := utils.TgReplyTextByContext(b, c,
+		"Reconexão solicitada. Use /status para confirmar.", nil, false)
 	return err
 }
 
