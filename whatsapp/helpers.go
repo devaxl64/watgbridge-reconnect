@@ -1,12 +1,15 @@
 package whatsapp
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"html"
 	"time"
 
 	"watgbridge/database"
 	"watgbridge/state"
+	"watgbridge/transfer"
 	"watgbridge/utils"
 
 	"github.com/PaulSonOfLars/gotgbot/v2"
@@ -58,6 +61,46 @@ func (bc *bridgeContext) sendFallbackText(extraText string) {
 		},
 	)
 	bc.savePair(sentMsg)
+}
+
+// mediaTransferSlot keeps at most one WhatsApp media byte buffer alive while
+// it is being uploaded to Telegram. On 256 MB RAM, downloading several 50 MB
+// videos simultaneously would crash the process.
+var mediaTransferSlot = make(chan struct{}, 1)
+var mediaTransferBudget transfer.Limiter
+const maxMediaInRAM int64 = 48 * 1024 * 1024
+
+// downloadMedia returns a release callback that MUST run after the Telegram
+// upload (not immediately after WhatsApp download) so byte buffers cannot
+// overlap. This limit is independent of the planned 600MB disk quota.
+func (bc *bridgeContext) downloadMedia(message whatsmeow.DownloadableMessage, declaredBytes uint64) ([]byte, func(), error) {
+	size := int64(declaredBytes)
+	if size <= 0 || size > maxMediaInRAM {
+		return nil,nil,errors.New("mídia acima de 48 MB ou sem tamanho informado; envio seguro indisponível")
+	}
+	select {
+	case mediaTransferSlot <- struct{}{}:
+	case <-time.After(2 * time.Minute):
+		return nil,nil,errors.New("limite de transferência ocupado; tente novamente mais tarde")
+	}
+	releaseSpace,err:=mediaTransferBudget.Reserve(size)
+	if err!=nil {
+		<-mediaTransferSlot
+		return nil,nil,err
+	}
+	release:=func(){releaseSpace();<-mediaTransferSlot}
+	ctx,cancel:=context.WithTimeout(context.Background(),3*time.Minute)
+	defer cancel()
+	data,err:=bc.waClient.Download(ctx,message)
+	if err!=nil {
+		release()
+		return nil,nil,err
+	}
+	if len(data)>int(maxMediaInRAM){
+		release()
+		return nil,nil,errors.New("mídia ultrapassou o limite seguro de memória")
+	}
+	return data,release,nil
 }
 
 // addCaption appends a caption (truncated at 1020 chars if needed) to
