@@ -247,7 +247,6 @@ func main() {
 		}
 	})
 
-	state.State.WhatsAppClient.AddEventHandler(whatsapp.WhatsAppEventHandler)
 	telegram.AddTelegramHandlers()
 	modules.LoadModuleHandlers()
 
