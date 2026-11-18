@@ -147,9 +147,12 @@ func main() {
 	}
 
 	if cfg.GoExecutable == "" {
-		cfg.GoExecutable = findExecutablePath(logger, cfg, "go", true)
-		logger.Info("setting path to go executable", zap.String("path", cfg.GoExecutable))
-		configChanged = true
+		// The lightweight runtime Docker image intentionally contains no Go
+		// compiler; it is only needed for optional in-place source updates.
+		cfg.GoExecutable = findExecutablePath(logger, cfg, "go", false)
+		if cfg.GoExecutable != "" {
+			logger.Info("setting path to go executable", zap.String("path", cfg.GoExecutable))
+		}
 	}
 
 	if cfg.FfmpegExecutable == "" && !cfg.Telegram.SkipVideoStickers {
@@ -159,10 +162,10 @@ func main() {
 	}
 
 	if configChanged {
+		// Mounted secret files are commonly read-only in production.
+		// Discovered binary paths only need to live for this process;
+		// refuse to rewrite secret config at startup.
 		_ = logger.Sync()
-		if err = cfg.SaveConfig(); err != nil {
-			logger.Fatal("failed to save config file", zap.Error(err))
-		}
 	}
 
 	// Restore an encrypted Telegram backup BEFORE either SQLite DB is opened.
