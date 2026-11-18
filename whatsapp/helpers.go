@@ -7,6 +7,7 @@ import (
 	"html"
 	"os"
 	"io"
+	"syscall"
 	"time"
 
 	"watgbridge/database"
@@ -124,6 +125,20 @@ func (bc *bridgeContext) downloadMediaToTemp(message whatsmeow.DownloadableMessa
 	}
 	releaseSpace,err:=mediaTransferBudget.Reserve(size)
 	if err!=nil { <-mediaTransferSlot; return nil,nil,err }
+
+	// The advertised 600 MB budget is an upper limit, not a guarantee that
+	// the ephemeral disk really has 600 MB free. Protect at least 100 MiB
+	// of space for SQLite, login state and the running process.
+	var disk syscall.Statfs_t
+	if err:=syscall.Statfs(os.TempDir(),&disk);err!=nil {
+		releaseSpace(); <-mediaTransferSlot
+		return nil,nil,err
+	}
+	available:=uint64(disk.Bavail)*uint64(disk.Bsize)
+	if available < uint64(size)+100*1024*1024 {
+		releaseSpace(); <-mediaTransferSlot
+		return nil,nil,errors.New("sem espaço temporário suficiente para mídia e margem de segurança")
+	}
 
 	file,err:=os.CreateTemp("", "watg-media-*.tmp")
 	if err!=nil {releaseSpace();<-mediaTransferSlot;return nil,nil,err}
