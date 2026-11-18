@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"html"
 	"strings"
+	"sync"
 	"time"
 
 	"watgbridge/database"
@@ -601,6 +602,29 @@ func MessageFromMeEventHandler(text string, v *events.Message, isEdited bool, is
 	}
 }
 
+// An unmapped WhatsApp chat can emit many media/history events during login.
+// Alert the owner once per chat per 15 minutes for media-only messages, rather
+// than filling their private Telegram conversation with identical notices.
+// Text messages are still delivered individually until group creation.
+var unlinkedMediaAlerts = struct {
+	sync.Mutex
+	seen map[string]time.Time
+}{seen: make(map[string]time.Time)}
+
+func shouldNotifyUnlinkedMedia(chatID, summary string, now time.Time) bool {
+	if strings.TrimSpace(summary) != "" { return true }
+	unlinkedMediaAlerts.Lock()
+	defer unlinkedMediaAlerts.Unlock()
+	if last, exists := unlinkedMediaAlerts.seen[chatID]; exists && now.Sub(last) < 15*time.Minute {
+		return false
+	}
+	for id, last := range unlinkedMediaAlerts.seen {
+		if now.Sub(last) >= 15*time.Minute { delete(unlinkedMediaAlerts.seen, id) }
+	}
+	unlinkedMediaAlerts.seen[chatID] = now
+	return true
+}
+
 // ============================================================
 // Messages from other people (main bridge path)
 // ============================================================
@@ -640,8 +664,11 @@ func MessageFromOthersEventHandler(text string, v *events.Message, isEdited bool
 				name = utils.WaGetGroupName(v.Info.Chat)
 			}
 			summary := strings.TrimSpace(text)
+			if !shouldNotifyUnlinkedMedia(CanonicalChatJID(v.Info.Chat).String(), summary, time.Now()) {
+				return
+			}
 			if summary == "" {
-				summary = "[Mídia ou evento recebido: grupo Telegram ainda não vinculado]"
+				summary = "[Mídia recebida antes da criação do grupo]"
 			}
 			if len([]rune(summary)) > 2500 {
 				summary = string([]rune(summary)[:2500]) + "..."
