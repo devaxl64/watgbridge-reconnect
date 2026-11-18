@@ -44,7 +44,7 @@ func TestTgOutgoingMediaLimitNoticeHostedDownloadLimit(t *testing.T) {
 	notice := TgOutgoingMediaLimitNotice(msg, false)
 	if !strings.Contains(notice, "Limite do bot: 20 MB.") ||
 		!strings.Contains(notice, "(25,0 MB)") ||
-		!strings.Contains(notice, "Limite configurado: 50 MB.") {
+		!strings.Contains(notice, "Não foi possível baixar o arquivo") {
 		t.Fatalf("did not explain hosted download limit: %q", notice)
 	}
 	if got := TgOutgoingMediaLimitNotice(msg, true); got != "" {
