@@ -2,7 +2,7 @@ name: Docker Build and Publish
 
 on:
   push:
-    branches: [ "main", "master" ]
+    branches: [ "main", "master", "feature/separate-chats" ]
     tags: [ 'v*.*.*' ]
   pull_request:
     branches: [ "main", "master" ]
@@ -69,5 +69,5 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          platforms: ${{ github.event_name == 'pull_request' && 'linux/amd64' || 'linux/amd64,linux/arm64' }}
+          platforms: ${{ (github.event_name == 'pull_request' || github.ref == 'refs/heads/feature/separate-chats') && 'linux/amd64' || 'linux/amd64,linux/arm64' }}
           no-cache: false
