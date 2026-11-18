@@ -43,7 +43,10 @@ func (m *Manager) RestoreIfMissing(ctx context.Context) (bool, error) {
 		return false, nil
 	}
 	missing := false
-	for _, path := range m.paths {
+	for name, path := range m.paths {
+		if name == optionalSession && os.Getenv("WATG_TG_APP_ID") == "" {
+			continue
+		}
 		if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
 			missing = true
 		} else if err != nil {
