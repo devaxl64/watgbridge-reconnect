@@ -27,6 +27,7 @@ type Config struct {
 		SudoUsersID         []int64 `yaml:"sudo_users_id"`
 		OwnerID             int64   `yaml:"owner_id"`
 		TargetChatID        int64   `yaml:"target_chat_id"`
+		SeparateChats       bool    `yaml:"separate_chats"`
 		SelfHostedAPI       bool    `yaml:"self_hosted_api"`
 		SendImagesAsFile    bool    `yaml:"send_images_as_file"`
 		SendStickersAsFile   bool    `yaml:"send_stickers_as_file"`
