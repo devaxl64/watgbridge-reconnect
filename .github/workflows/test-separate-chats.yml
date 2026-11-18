@@ -9,6 +9,7 @@ on:
       - 'telegram/**'
       - 'whatsapp/**'
       - 'utils/**'
+      - 'state/**'
       - 'main.go'
       - 'go.mod'
       - 'go.sum'
@@ -24,6 +25,6 @@ jobs:
         with:
           go-version-file: go.mod
       - name: Run routing tests
-        run: go test ./database ./transfer ./sessionbackup ./whatsapp ./telegram ./utils
+        run: go test ./...
       - name: Compile the complete bridge
         run: go build ./...
