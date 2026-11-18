@@ -11,6 +11,7 @@ import (
 
 	"watgbridge/database"
 	"watgbridge/modules"
+	"watgbridge/groupclient"
 	"watgbridge/sessionbackup"
 	"watgbridge/state"
 	"watgbridge/telegram"
@@ -211,6 +212,21 @@ func main() {
 	}
 	_ = logger.Sync()
 
+	// A Telegram USER session (MTProto) is needed to create true separate
+	// supergroups. Credentials are runtime secrets, never GitHub files.
+	// The encrypted Telegram backup was already restored above.
+	userClient, err := groupclient.NewFromEnvironment(func(message string) {
+		_, _ = state.State.TelegramBot.SendMessage(
+			cfg.Telegram.OwnerID, message, &gotgbot.SendMessageOpts{})
+	})
+	if err != nil {
+		logger.Fatal("invalid Telegram user configuration", zap.Error(err))
+	}
+	groupclient.Register(userClient)
+	if userClient != nil {
+		userClient.Start(context.Background())
+	}
+
 	// When encrypted backups are enabled, keep the bot online even when the
 	// WhatsApp session was lost. The owner can use /codigo from one phone.
 	deferPairing := backupManager != nil || os.Getenv("WATG_DEFER_PAIRING") == "1"
@@ -223,6 +239,39 @@ func main() {
 	_ = logger.Sync()
 
 	state.State.StartTime = time.Now().UTC()
+	// Periodically re-discover all Telegram groups from their encrypted
+	// descriptions. No new groups by default until the owner authorizes it.
+	if cfg.Telegram.SeparateChats && userClient != nil {
+		autoCreate := 0
+		if raw := os.Getenv("WATG_AUTOCREATE_BATCH"); raw != "" {
+			count, parseErr := strconv.Atoi(raw)
+			if parseErr == nil && count >= 0 && count <= 5 {
+				autoCreate = count
+			}
+		}
+		go func() {
+			// Allow WhatsApp history-sync metadata to arrive first.
+			ticker := time.NewTicker(5 * time.Minute)
+			defer ticker.Stop()
+			for {
+				<-ticker.C
+				wa := state.State.WhatsAppClient
+				if wa == nil || !wa.IsLoggedIn() || !userClient.Ready() {continue}
+				ctx, cancel := context.WithTimeout(context.Background(), 12*time.Minute)
+				report, syncErr := userClient.Sync(ctx, autoCreate,
+					state.State.TelegramBot.Username)
+				cancel()
+				if syncErr != nil {
+					logger.Warn("Telegram group synchronization deferred", zap.Error(syncErr))
+				} else if report.Created > 0 || report.Recovered > 0 {
+					logger.Info("Telegram groups synchronized",
+						zap.Int("recovered", report.Recovered),
+						zap.Int("created", report.Created))
+				}
+			}
+		}()
+	}
+
 
 	// Snapshot only authenticated sessions; never overwrite a good backup
 	// with a newly created but unpaired device database.
