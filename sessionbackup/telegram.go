@@ -107,7 +107,7 @@ func (t *TelegramStore) pinned(ctx context.Context) (*telegramPinned, error) {
 		return nil, err
 	}
 	msg := chat.PinnedMessage
-	if msg == nil || msg.Caption != backupCaption || msg.Document == nil || msg.Document.FileID == "" {
+	if msg == nil || (msg.Caption != backupCaption && !strings.HasPrefix(msg.Caption, backupCaption+"\n")) || msg.Document == nil || msg.Document.FileID == "" {
 		return nil, ErrNoBackup
 	}
 	return msg, nil
@@ -137,77 +137,95 @@ func (t *TelegramStore) mediaRequest(ctx context.Context, method string, fields 
 	return t.doAPI(ctx, method, writer.FormDataContentType(), &body, result)
 }
 
-// Upload replaces the pinned backup document in place when possible,
-// avoiding duplicate messages. If editing fails, a new pinned backup is
-// created; the previous pinned backup is never proactively deleted.
+// backupPrevious is stored in the caption of the latest pinned encrypted
+// document. Telegram only exposes the latest pinned message via getChat, so
+// the caption retains the *previous* encrypted document's file ID.
+type backupPrevious struct {
+	FileID string `json:"file_id"`
+	MessageID int64 `json:"message_id"`
+}
+
+func previousFromCaption(caption string) backupPrevious {
+	var previous backupPrevious
+	if !strings.HasPrefix(caption, backupCaption+"\n") { return previous }
+	if err := json.Unmarshal([]byte(strings.TrimPrefix(caption, backupCaption+"\n")), &previous); err != nil {
+		return backupPrevious{}
+	}
+	if len(previous.FileID) > 1024 || previous.MessageID < 0 {
+		return backupPrevious{}
+	}
+	return previous
+}
+
+// Upload ALWAYS creates and verifies the new encrypted document before
+// replacing the pinned pointer. Editing the only existing backup in place
+// would destroy the last known-good restore copy if the new blob were bad.
+// The two most recent blobs remain available after a successful rotation.
 func (t *TelegramStore) Upload(ctx context.Context, encrypted []byte) error {
 	if len(encrypted) == 0 || len(encrypted) > MaxEncryptedSize {
 		return errors.New("encrypted backup exceeds size limit")
 	}
 	old, err := t.pinned(ctx)
-	if err != nil && !errors.Is(err, ErrNoBackup) {
-		return err
-	}
+	if err != nil && !errors.Is(err, ErrNoBackup) { return err }
+
+	caption := backupCaption
 	if old != nil {
-		media := map[string]string{
-			"type": "document", "media": "attach://document", "caption": backupCaption,
+		ref, err := json.Marshal(backupPrevious{FileID: old.Document.FileID, MessageID: old.MessageID})
+		if err != nil { return err }
+		caption += "\n" + string(ref)
+		if len(caption) > 1024 {
+			return errors.New("backup caption exceeds Telegram length limit")
 		}
-		mediaJSON, err := json.Marshal(media)
-		if err != nil {
-			return err
-		}
-		var edited telegramPinned
-		err = t.mediaRequest(ctx, "editMessageMedia",
-			map[string]string{
-				"chat_id": strconv.FormatInt(t.chatID, 10),
-				"message_id": strconv.FormatInt(old.MessageID, 10),
-				"media": string(mediaJSON),
-			}, encrypted, &edited)
-		if err == nil && edited.Document != nil {
-			return nil
-		}
-		// Editing failed; preserve the old pinned copy and try a new one.
 	}
-	var message telegramPinned
+	var uploaded telegramPinned
 	err = t.mediaRequest(ctx, "sendDocument",
 		map[string]string{
 			"chat_id": strconv.FormatInt(t.chatID, 10),
-			"caption": backupCaption,
+			"caption": caption,
 			"disable_notification": "true",
-		}, encrypted, &message)
-	if err != nil {
-		return err
+		}, encrypted, &uploaded)
+	if err != nil { return err }
+	if uploaded.MessageID == 0 || uploaded.Document == nil || uploaded.Document.FileID == "" {
+		return errors.New("Telegram did not return the uploaded backup document")
 	}
-	if message.MessageID == 0 {
-		return errors.New("Telegram did not return message ID for uploaded backup")
+	// This verification also checks that the bot can fetch the new document
+	// on restart. On failure, the old pinned backup is left untouched.
+	verified, err := t.downloadFile(ctx, uploaded.Document.FileID)
+	if err != nil { return fmt.Errorf("uploaded backup is not readable: %w", err) }
+	if !bytes.Equal(verified, encrypted) {
+		return errors.New("uploaded backup differs from the encrypted snapshot")
 	}
 	var pinned bool
 	if err := t.callJSON(ctx, "pinChatMessage", map[string]any{
 		"chat_id": t.chatID,
-		"message_id": message.MessageID,
+		"message_id": uploaded.MessageID,
 		"disable_notification": true,
-	}, &pinned); err != nil {
-		return err
-	}
-	if !pinned {
-		return errors.New("Telegram did not confirm pinning the backup")
+	}, &pinned); err != nil { return err }
+	if !pinned { return errors.New("Telegram did not confirm pinning the new backup") }
+
+	// Preserve the immediate previous backup for rollback. An older third
+	// document is removed when supported; a failed cleanup is not a backup
+	// failure and does not remove either of the two newest snapshots.
+	if old != nil {
+		grandparent := previousFromCaption(old.Caption)
+		if grandparent.MessageID != 0 &&
+			grandparent.MessageID != old.MessageID &&
+			grandparent.MessageID != uploaded.MessageID {
+			var deleted bool
+			_ = t.callJSON(ctx, "deleteMessage", map[string]any{
+				"chat_id": t.chatID, "message_id": grandparent.MessageID,
+			}, &deleted)
+		}
 	}
 	return nil
 }
 
-// Download fetches only the document currently pinned by the bot in its
-// owner's private chat. Telegram's getFile limit is 20 MB.
-func (t *TelegramStore) Download(ctx context.Context) ([]byte, error) {
-	pinned, err := t.pinned(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if pinned.Document.FileSize > MaxEncryptedSize {
-		return nil, errors.New("pinned backup is larger than the supported limit")
-	}
+// downloadFile retrieves an encrypted document, bounded by the Bot API's
+// download size limit and validated against safe relative file paths.
+func (t *TelegramStore) downloadFile(ctx context.Context, fileID string) ([]byte, error) {
+	if fileID == "" { return nil, errors.New("missing backup file ID") }
 	var file telegramFile
-	if err := t.callJSON(ctx, "getFile",
-		map[string]any{"file_id": pinned.Document.FileID}, &file); err != nil {
+	if err := t.callJSON(ctx, "getFile", map[string]any{"file_id": fileID}, &file); err != nil {
 		return nil, err
 	}
 	if file.FilePath == "" || file.FileSize > MaxEncryptedSize ||
@@ -217,23 +235,49 @@ func (t *TelegramStore) Download(ctx context.Context) ([]byte, error) {
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
 		t.fileRoot+t.token+"/"+file.FilePath, nil)
-	if err != nil {
-		return nil, errors.New("could not create Telegram file request")
-	}
+	if err != nil { return nil, errors.New("could not create Telegram file request") }
 	resp, err := t.client.Do(req)
-	if err != nil {
-		return nil, errors.New("could not download encrypted backup from Telegram")
-	}
+	if err != nil { return nil, errors.New("could not download encrypted backup from Telegram") }
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("Telegram file download failed with HTTP %d", resp.StatusCode)
 	}
 	payload, err := io.ReadAll(io.LimitReader(resp.Body, MaxEncryptedSize+1))
-	if err != nil {
-		return nil, err
-	}
+	if err != nil { return nil, err }
 	if len(payload) == 0 || len(payload) > MaxEncryptedSize {
 		return nil, errors.New("downloaded encrypted backup has invalid size")
 	}
 	return payload, nil
+}
+
+// DownloadCandidates retrieves the newest and previous encrypted snapshots.
+// The manager authenticates/decrypts them in order, using the older one only
+// when the newest has become unreadable or corrupt.
+func (t *TelegramStore) DownloadCandidates(ctx context.Context) ([][]byte, error) {
+	msg, err := t.pinned(ctx)
+	if err != nil { return nil, err }
+	previous := previousFromCaption(msg.Caption)
+	ids := []string{msg.Document.FileID}
+	if previous.FileID != "" && previous.FileID != msg.Document.FileID {
+		ids = append(ids, previous.FileID)
+	}
+	var candidates [][]byte
+	var lastErr error
+	for _, id := range ids {
+		data, err := t.downloadFile(ctx, id)
+		if err != nil { lastErr = err; continue }
+		candidates = append(candidates, data)
+	}
+	if len(candidates) == 0 {
+		if lastErr == nil { lastErr = errors.New("no readable encrypted backup") }
+		return nil, lastErr
+	}
+	return candidates, nil
+}
+
+// Download retains the simple latest-first API for diagnostic callers.
+func (t *TelegramStore) Download(ctx context.Context) ([]byte, error) {
+	candidates, err := t.DownloadCandidates(ctx)
+	if err != nil { return nil, err }
+	return candidates[0], nil
 }
