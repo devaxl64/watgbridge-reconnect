@@ -19,6 +19,8 @@ type KnownChat struct {
 	Kind     string    `gorm:"column:kind;index"`
 	Source   string    `gorm:"column:source"`
 	SeenAt   time.Time `gorm:"column:seen_at;index"`
+	PictureID string `gorm:"column:picture_id"`
+	PictureCheckedAt time.Time `gorm:"column:picture_checked_at"`
 }
 
 func validKnownChat(chat KnownChat) bool {
@@ -103,4 +105,31 @@ func ListKnownChats(limit int) ([]KnownChat, error) {
 	var chats []KnownChat
 	err := state.State.Database.Order("seen_at DESC").Order("wa_chat_id ASC").Limit(limit).Find(&chats).Error
 	return chats, err
+}
+
+func KnownAvatarVersion(waChatID string) (string, time.Time, error) {
+	if state.State.Database == nil {
+		return "", time.Time{}, errors.New("database is not initialized")
+	}
+	var chat KnownChat
+	err := state.State.Database.Where("wa_chat_id = ?", waChatID).First(&chat).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return "", time.Time{}, nil
+	}
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	return chat.PictureID, chat.PictureCheckedAt, nil
+}
+
+func SetKnownAvatarVersion(waChatID, pictureID string) error {
+	if state.State.Database == nil {
+		return errors.New("database is not initialized")
+	}
+	return state.State.Database.Model(&KnownChat{}).
+		Where("wa_chat_id = ?", waChatID).
+		Updates(map[string]any{
+			"picture_id": pictureID,
+			"picture_checked_at": time.Now().UTC(),
+		}).Error
 }
