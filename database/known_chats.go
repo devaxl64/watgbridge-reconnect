@@ -44,7 +44,7 @@ func validKnownChat(chat KnownChat) bool {
 // Hide old placeholder records without deleting a Telegram group or its route.
 // Existing invalid rows may have been inserted before the guard existed.
 func activeKnownChats(db *gorm.DB) *gorm.DB {
-	return db.Where("wa_chat_id NOT IN ?", []string{"0@s.whatsapp.net", "0@lid"})
+	return db.Where("known_chats.wa_chat_id NOT IN ?", []string{"0@s.whatsapp.net", "0@lid"})
 }
 
 // RecordKnownChat upserts by the stable WhatsApp JID. It never clears an
