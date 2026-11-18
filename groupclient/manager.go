@@ -12,14 +12,16 @@ import (
 
 	"github.com/gotd/td/session"
 	"github.com/gotd/td/telegram"
-	"github.com/gotd/td/telegram/auth"
+	"github.com/gotd/td/telegram/auth/qrlogin"
+	"github.com/gotd/td/tgerr"
+	"github.com/skip2/go-qrcode"
 	"github.com/gotd/td/tg"
 )
 
 var (
 	ErrNotConfigured = errors.New("Telegram user client not configured")
 	ErrNotAuthorized = errors.New("Telegram user client not yet authenticated; use /tglogin in bot private chat")
-	ErrCodeNotRequested = errors.New("Telegram did not request a login code")
+	ErrCodeNotRequested = errors.New("O Telegram bloqueia códigos compartilhados em conversas. Use /tglogin e autentique por QR Code.")
 )
 
 type operation struct {
@@ -38,15 +40,14 @@ type Manager struct {
 	password string
 	sessionFile string
 	notify func(string)
+	qrNotify func([]byte) error
 
 	loginRequests chan struct{}
-	loginCodes chan string
 	operations chan operation
 	ready atomic.Bool
 	// Once a full remote scan succeeds, repeated provisioning batches can use
 	// the stable local index instead of re-reading every Telegram group.
 	remoteCatalogReady atomic.Bool
-	waitingForCode atomic.Bool
 	started atomic.Bool
 }
 
@@ -71,7 +72,6 @@ func NewFromEnvironment(notify func(string)) (*Manager, error) {
 		password:os.Getenv("WATG_TG_PASSWORD"),
 		sessionFile:filename, notify:notify,
 		loginRequests:make(chan struct{},1),
-		loginCodes:make(chan string,1),
 		operations:make(chan operation),
 	},nil
 }
@@ -96,24 +96,44 @@ func (m *Manager) BeginLogin() error {
 	}
 }
 
-func (m *Manager) SubmitCode(code string) error {
+// SubmitCode is intentionally disabled. Sending any Telegram login code into
+// a bot chat causes Telegram to invalidate it (even if we delete the message).
+func (m *Manager) SubmitCode(_ string) error {
 	if m == nil { return ErrNotConfigured }
-	code = strings.TrimSpace(code)
-	if len(code) < 4 || len(code) > 8 {
-		return errors.New("invalid Telegram login code")
+	return ErrCodeNotRequested
+}
+
+// SetQRNotifier configures delivery of short-lived Telegram QR tokens as PNG
+// photos in the owner's private chat. It must be set before Start.
+func (m *Manager) SetQRNotifier(fn func([]byte) error) {
+	if m != nil { m.qrNotify = fn }
+}
+
+// qrLogin never sends a numeric Telegram sign-in code to a chat or log.
+func (m *Manager) qrLogin(ctx context.Context, client *telegram.Client, loggedIn qrlogin.LoggedIn) error {
+	if m.qrNotify == nil {
+		return errors.New("QR notifier not configured")
 	}
-	for _, ch := range code {
-		if ch < '0' || ch > '9' { return errors.New("Telegram login code contains non-numeric characters") }
-	}
-	if !m.waitingForCode.Load() {
-		return ErrCodeNotRequested
-	}
-	select {
-	case m.loginCodes <- code:
+	loginCtx, cancel := context.WithTimeout(ctx, 3*time.Minute)
+	defer cancel()
+
+	_, err := client.QR().Auth(loginCtx, loggedIn, func(_ context.Context, token qrlogin.Token) error {
+		png, err := qrcode.Encode(token.URL(), qrcode.High, 560)
+		if err != nil { return errors.New("could not generate Telegram QR code") }
+		if err := m.qrNotify(png); err != nil {
+			return errors.New("could not send Telegram QR code to owner")
+		}
 		return nil
-	default:
-		return errors.New("Telegram login code already supplied")
+	})
+	if err == nil { return nil }
+	if tgerr.Is(err, "SESSION_PASSWORD_NEEDED") {
+		if m.password == "" {
+			return errors.New("Telegram 2FA password required; set WATG_TG_PASSWORD")
+		}
+		_, err = client.Auth().Password(ctx, m.password)
+		return err
 	}
+	return err
 }
 
 func (m *Manager) Start(ctx context.Context) {
@@ -124,9 +144,12 @@ func (m *Manager) Start(ctx context.Context) {
 func (m *Manager) loop(ctx context.Context) {
 	defer m.ready.Store(false)
 	for ctx.Err() == nil {
+		// QR login relies on UpdateLoginToken, so MTProto updates must be enabled.
+		dispatcher := tg.NewUpdateDispatcher()
+		loggedIn := qrlogin.OnLoginToken(&dispatcher)
 		client := telegram.NewClient(m.appID, m.appHash, telegram.Options{
 			SessionStorage: &session.FileStorage{Path:m.sessionFile},
-			NoUpdates:true, // group creation and lookups are request-only
+			UpdateHandler: dispatcher,
 		})
 		err := client.Run(ctx, func(runCtx context.Context) error {
 			status, err := client.Auth().Status(runCtx)
@@ -137,17 +160,7 @@ func (m *Manager) loop(ctx context.Context) {
 				case <-runCtx.Done(): return runCtx.Err()
 				case <-m.loginRequests:
 				}
-				flow := auth.NewFlow(auth.Constant(m.phone,m.password,
-					auth.CodeAuthenticatorFunc(func(codeCtx context.Context, _ *tg.AuthSentCode) (string,error) {
-						m.waitingForCode.Store(true)
-						defer m.waitingForCode.Store(false)
-						m.notify("O Telegram enviou um código para sua conta. Envie /tgcodigo 12345 ao bot no privado.")
-						select {
-						case code := <-m.loginCodes: return code,nil
-						case <-codeCtx.Done(): return "",codeCtx.Err()
-						}
-					})),auth.SendCodeOptions{})
-				if err := client.Auth().IfNecessary(runCtx,flow); err != nil { return err }
+				if err := m.qrLogin(runCtx, client, loggedIn); err != nil { return err }
 			}
 			m.ready.Store(true)
 			defer m.ready.Store(false)
@@ -166,8 +179,15 @@ func (m *Manager) loop(ctx context.Context) {
 		})
 		if ctx.Err()!=nil { return }
 		if err!=nil {
-			// Avoid exposing private credentials/session details in messages.
-			m.notify("Conexão MTProto interrompida. Verifique os logs; farei nova tentativa.")
+			// Do not leak Telegram login tokens or credential values to chat.
+			switch {
+			case errors.Is(err, context.DeadlineExceeded):
+				m.notify("QR Code expirou. Use /tglogin para gerar outro.")
+			case strings.Contains(err.Error(),"2FA password required"):
+				m.notify("O Telegram exige senha de duas etapas. Configure WATG_TG_PASSWORD no Northflank e reinicie para tentar novamente.")
+			default:
+				m.notify("Não foi possível autenticar por QR. Confira os logs e use /tglogin para tentar novamente.")
+			}
 		}
 		select {
 		case <-ctx.Done():return
