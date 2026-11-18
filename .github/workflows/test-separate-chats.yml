@@ -23,6 +23,6 @@ jobs:
         with:
           go-version-file: go.mod
       - name: Run routing tests
-        run: go test ./database ./transfer ./sessionbackup
+        run: go test ./database ./transfer ./sessionbackup ./whatsapp ./telegram
       - name: Compile the complete bridge
         run: go build ./...
