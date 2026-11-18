@@ -53,6 +53,9 @@ type Manager struct {
 func NewFromEnvironment(notify func(string)) (*Manager, error) {
 	idStr := strings.TrimSpace(os.Getenv("WATG_TG_APP_ID"))
 	hash := strings.TrimSpace(os.Getenv("WATG_TG_APP_HASH"))
+	// Keep the existing Northflank API_ID / API_HASH values working.
+	if idStr == "" { idStr = strings.TrimSpace(os.Getenv("API_ID")) }
+	if hash == "" { hash = strings.TrimSpace(os.Getenv("API_HASH")) }
 	phone := strings.TrimSpace(os.Getenv("WATG_TG_PHONE"))
 	if idStr == "" && hash == "" && phone == "" { return nil, nil }
 	if idStr == "" || hash == "" || phone == "" {
