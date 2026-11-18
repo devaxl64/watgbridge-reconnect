@@ -25,6 +25,20 @@ Cada conversa do WhatsApp deverá aparecer como **um grupo separado na lista pri
 - [ ] Implementar `/status`, `/reconectar` e aviso de desconexão sem spam.
 - [ ] Testar memória no limite de 256 MB do Northflank.
 
+
+## Decisão de recursos: 256 MB de RAM, 1 GB de disco efêmero
+
+- Os **256 MB** são memória RAM, não armazenamento de arquivos. O contêiner tem **1 GB de disco efêmero** por padrão; arquivos nesse disco podem desaparecer quando o contêiner é substituído.
+- **Persistência mínima:** manter apenas as associações `WhatsApp JID <-> Telegram group ID`, metadados de entrega necessários e **credenciais/estado de sessão WhatsApp criptografados**. Só IDs de conversa não bastam para restaurar o login do WhatsApp.
+- **Sem banco de histórico:** após transmitir, manter a mensagem no Telegram; não guardar cópias de fotos, vídeos nem conteúdo textual já entregue.
+- **Recepção de mídia:** baixar do WhatsApp autenticado, transmitir ao Telegram e apagar temporários imediatamente após confirmação. Não é possível simplesmente entregar uma URL privada do WhatsApp ao Telegram como se fosse um link público.
+- **RAM:** o código atual usa `WhatsAppClient.Download(...)`, que devolve os arquivos como `[]byte` em memória; isso precisa ser refatorado ou limitado para não esgotar 256 MB. Usar transmissão por partes quando suportada, ou arquivos temporários com limites de tamanho, fila e limpeza em caso de erro.
+- **Concorrência:** processar mídia pesada sequencialmente no plano de 256 MB, impor limites para arquivos grandes, e evitar conversões simultâneas (principalmente vídeos/stickers animados).
+- **Estado externo:** buscar armazenamento gratuito e seguro para vínculos e sessões, ou mecanismo de recuperação confiável; **não** gravar sessões nem dados de contatos em repositório GitHub público.
+- **Retentativas:** se o WhatsApp já tiver eliminado uma mídia, registrar falha amigável; não assumir que ela poderá ser baixada indefinidamente.
+
+**Ordem de implementação:** primeiro os vínculos e resposta por grupo; depois reduzir a memória do fluxo de mídia, preparar persistência segura e só então substituir a versão em produção.
+
 ## Como verificar a etapa inicial
 
 ```sh
