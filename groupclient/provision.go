@@ -44,10 +44,11 @@ func (m *Manager) Sync(ctx context.Context, maxNew int, botUsername string) (Rep
 	if botUsername == "" { return report, errors.New("Telegram bot username missing") }
 
 	err:=m.Do(ctx,func(ctx context.Context,api *tg.Client)error{
-		found,err:=scanTelegramBridgeGroups(ctx,api)
-		if err!=nil{return err} // never create groups on incomplete scan
-		report.Found=len(found)
-		for waID, ch:=range found {
+		if !m.remoteCatalogReady.Load() {
+			found,err:=scanTelegramBridgeGroups(ctx,api)
+			if err!=nil{return err} // never create groups on incomplete scan
+			report.Found=len(found)
+			for waID, ch:=range found {
 			_,wasLinked,lookupErr:=database.TelegramGroupForWhatsApp(waID)
 			if lookupErr!=nil{return lookupErr}
 			if err:=database.EnsureSeparateChat(waID,SupergroupID(ch.ID));err!=nil {
@@ -58,7 +59,9 @@ func (m *Manager) Sync(ctx context.Context, maxNew int, botUsername string) (Rep
 			if err:=database.RecordKnownChat(database.KnownChat{
 				WaChatID:waID,Kind:kind,Name:ch.Title,Source:"telegram-recovery",
 			});err!=nil{return err}
-			if !wasLinked {report.Recovered++}
+				if !wasLinked {report.Recovered++}
+			}
+			m.remoteCatalogReady.Store(true)
 		}
 		if maxNew==0{return nil}
 
@@ -100,6 +103,9 @@ func (m *Manager) Sync(ctx context.Context, maxNew int, botUsername string) (Rep
 		}
 		return nil
 	})
+	// An error after creating a remote group may mean its local route was
+	// not saved. Force a remote rescan on retry before another creation.
+	if err != nil { m.remoteCatalogReady.Store(false) }
 	return report,err
 }
 
