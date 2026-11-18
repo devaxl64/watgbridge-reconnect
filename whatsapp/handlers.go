@@ -623,8 +623,26 @@ func MessageFromOthersEventHandler(text string, v *events.Message, isEdited bool
 			return
 		}
 		if !found {
-			// The lightweight chat catalog has already recorded this JID.
-			// Creation is handled separately by an authorized user session.
+			// Never silently discard incoming WhatsApp messages during an
+			// initial chat-list migration. Deliver to the owner's PRIVATE
+			// Telegram chat until a dedicated group has been provisioned.
+			name := utils.WaGetContactName(v.Info.MessageSource.Sender)
+			if v.Info.IsGroup {
+				name = utils.WaGetGroupName(v.Info.Chat)
+			}
+			summary := strings.TrimSpace(text)
+			if summary == "" {
+				summary = "[Mídia ou evento recebido: grupo Telegram ainda não vinculado]"
+			}
+			if len([]rune(summary)) > 2500 {
+				summary = string([]rune(summary)[:2500]) + "..."
+			}
+			alert := "Mensagem recebida antes da criação do grupo Telegram.\n" +
+				"Conversa: <b>" + html.EscapeString(name) + "</b>\n\n" +
+				html.EscapeString(summary)
+			if _, sendErr := tgBot.SendMessage(cfg.Telegram.OwnerID, alert, nil); sendErr != nil {
+				logger.Warn("could not deliver fallback WhatsApp message to owner", zap.Error(sendErr))
+			}
 			return
 		}
 		targetTgChatID = groupID
