@@ -82,3 +82,20 @@ func TestSeparateChatRejectsInvalidIDs(t *testing.T) {
 		t.Fatal("accepted empty Telegram chat ID")
 	}
 }
+
+
+func TestEnsureSeparateChatNeverCreatesDuplicateGroup(t *testing.T) {
+	db := newRouteTestDB(t)
+	const jid = "5511999999999@s.whatsapp.net"
+	if err := ensureSeparateChat(db, jid, -100111); err != nil { t.Fatal(err) }
+	if err := ensureSeparateChat(db, jid, -100111); err != nil { t.Fatal("idempotent retry failed:", err) }
+	if err := ensureSeparateChat(db, jid, -100222); !errors.Is(err, ErrWhatsAppAlreadyLinked) {
+		t.Fatalf("expected protection against duplicate group, got %v", err)
+	}
+	if err := ensureSeparateChat(db, "another@g.us", -100111); !errors.Is(err, ErrChatAlreadyLinked) {
+		t.Fatalf("expected protection against group reuse, got %v", err)
+	}
+	var n int64
+	if err := db.Model(&ChatRoute{}).Count(&n).Error; err != nil { t.Fatal(err) }
+	if n != 1 { t.Fatalf("expected 1 route, got %d", n) }
+}
