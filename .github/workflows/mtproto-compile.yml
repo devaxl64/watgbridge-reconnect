@@ -17,6 +17,10 @@ on:
       - '.github/workflows/mtproto-compile.yml'
   workflow_dispatch:
 
+concurrency:
+  group: mtproto-feature-separate-chats
+  cancel-in-progress: true
+
 permissions:
   contents: write
 
@@ -35,16 +39,18 @@ jobs:
           go-version-file: go.mod
       - name: Resolve exact dependencies
         run: go mod tidy
-      - name: Persist generated go.sum only on working feature branch
+      - name: Test all packages
+        run: go test ./...
+      - name: Verify entire project compiles
+        run: go build ./...
+      - name: Persist tested dependency checksums on feature branch
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add go.mod go.sum
           if ! git diff --cached --quiet; then
             git commit -m "build: synchronize MTProto dependency checksums"
+            git fetch origin feature/separate-chats
+            git rebase origin/feature/separate-chats
             git push origin HEAD:feature/separate-chats
           fi
-      - name: Test all packages
-        run: go test ./...
-      - name: Verify entire project compiles
-        run: go build ./...
