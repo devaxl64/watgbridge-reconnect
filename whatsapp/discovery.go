@@ -22,7 +22,7 @@ func canonicalChatID(raw string) (id, kind string, ok bool) {
 	if err != nil || jid.User == "" {
 		return "", "", false
 	}
-	jid = jid.ToNonAD()
+	jid = CanonicalChatJID(jid)
 	switch jid.Server {
 	case "g.us":
 		return jid.String(), "group", true
@@ -93,7 +93,7 @@ func CaptureIncomingChat(event *events.Message) {
 	if !event.Info.IsFromMe && event.Info.Chat.Server != "g.us" {
 		name = event.Info.PushName
 	}
-	recordChatID(event.Info.Chat.String(), name, "message")
+	recordChatID(CanonicalChatJID(event.Info.Chat).String(), name, "message")
 }
 
 // CollectJoinedGroups retrieves current group IDs and titles from WhatsApp.
