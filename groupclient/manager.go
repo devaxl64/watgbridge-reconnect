@@ -43,6 +43,9 @@ type Manager struct {
 	loginCodes chan string
 	operations chan operation
 	ready atomic.Bool
+	// Once a full remote scan succeeds, repeated provisioning batches can use
+	// the stable local index instead of re-reading every Telegram group.
+	remoteCatalogReady atomic.Bool
 	waitingForCode atomic.Bool
 	started atomic.Bool
 }
@@ -76,6 +79,8 @@ var global *Manager
 func Register(m *Manager) { global = m }
 func Active() *Manager { return global }
 func (m *Manager) Ready() bool { return m != nil && m.ready.Load() }
+// ForceRemoteRecovery makes the next Sync reconstruct Telegram routes again.
+func (m *Manager) ForceRemoteRecovery() { if m != nil { m.remoteCatalogReady.Store(false) } }
 
 func (m *Manager) BeginLogin() error {
 	if m == nil { return ErrNotConfigured }
