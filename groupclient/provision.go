@@ -25,6 +25,7 @@ type Report struct {
 	Found int
 	Recovered int
 	Created int
+	Renamed int
 	Skipped int
 }
 
@@ -66,7 +67,7 @@ func (m *Manager) Sync(ctx context.Context, maxNew int, botUsername string) (Rep
 				return fmt.Errorf("recovery conflict for %s: %w",waID,err)
 			}
 			if err:=database.RecordKnownChat(database.KnownChat{
-				WaChatID:waID,Kind:kind,Name:ch.Title,Source:"telegram-recovery",
+				WaChatID:waID,Kind:kind,Source:"telegram-recovery",
 			});err!=nil{return err}
 				if !wasLinked {report.Recovered++}
 			}
@@ -76,6 +77,28 @@ func (m *Manager) Sync(ctx context.Context, maxNew int, botUsername string) (Rep
 
 		chats,err:=database.ListAllKnownChats(0)
 		if err!=nil{return err}
+		// Repair up to two automatically generated numeric group titles on
+		// each sync. Respect any human-edited Telegram group titles.
+		for _,chat:=range chats {
+			if report.Renamed>=2 { break }
+			if ctx.Err()!=nil{return ctx.Err()}
+			if chat.Kind!="private" {continue}
+			number:=strings.SplitN(chat.WaChatID,"@",2)[0]
+			name:=strings.TrimSpace(chat.Name)
+			if !humanContactName(name,number) {name=contactDisplayName(chat)}
+			if name=="" {continue}
+			tgID,linked,lookupErr:=database.TelegramGroupForWhatsApp(chat.WaChatID)
+			if lookupErr!=nil{return lookupErr}
+			if !linked || state.State.TelegramBot==nil {continue}
+			remote,lookupErr:=state.State.TelegramBot.GetChat(tgID,nil)
+			if lookupErr!=nil {continue} // no permission: never break creation
+			if !isLegacyNumericTitle(remote.Title,number) {continue}
+			expected:=chatTitle(database.KnownChat{WaChatID:chat.WaChatID,Kind:chat.Kind,Name:name})
+			if _,renameErr:=state.State.TelegramBot.SetChatTitle(tgID,expected,nil);renameErr==nil {
+				report.Renamed++
+				_ = database.RecordKnownChat(database.KnownChat{WaChatID:chat.WaChatID,Kind:chat.Kind,Name:name,Source:"contact-title-refresh"})
+			}
+		}
 		for _,chat:=range chats {
 			if report.Created>=maxNew {break}
 			if ctx.Err()!=nil{return ctx.Err()}
@@ -151,6 +174,11 @@ func contactDisplayName(chat database.KnownChat) string {
 	return ""
 }
 
+func isLegacyNumericTitle(title, number string) bool {
+	title=strings.TrimSpace(title)
+	return title==number || title=="+"+number || title==strings.TrimPrefix(number,"55")
+}
+
 func humanContactName(name, number string) bool {
 	name = strings.TrimSpace(name)
 	return name != "" && name != number && name != "+"+number &&
@@ -170,7 +198,7 @@ func chatTitle(chat database.KnownChat) string {
 		}
 		if name == "" {
 			name = "+" + num
-		} else {
+		} else if !strings.HasSuffix(name, " (+"+num+")") {
 			name += " (+" + num + ")"
 		}
 	} else if name == "" {
