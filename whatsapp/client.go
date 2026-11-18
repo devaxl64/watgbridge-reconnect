@@ -180,7 +180,16 @@ func pairWithQRCode(client *whatsmeow.Client, logger *zap.Logger) error {
 	return fmt.Errorf("could not complete whatsapp login : the QR codes expired %d times without a scan", maxQRPairingAttempts)
 }
 
+// NewWhatsAppClient preserves the upstream behavior for existing deployments.
 func NewWhatsAppClient() error {
+	return NewWhatsAppClientWithPairing(false)
+}
+
+// NewWhatsAppClientWithPairing optionally waits for an explicit /codigo
+// command instead of flooding the owner chat with QR codes at startup.
+// The disconnected WhatsApp client is still initialized so Telegram commands
+// stay available on a machine with no screen or keyboard.
+func NewWhatsAppClientWithPairing(deferPairing bool) error {
 
 	var (
 		cfg    = state.State.Config
@@ -289,6 +298,10 @@ func NewWhatsAppClient() error {
 	state.State.WhatsAppClient = client
 
 	if client.Store.ID == nil {
+		if deferPairing {
+			logger.Warn("WhatsApp session unavailable; awaiting owner pairing command /codigo")
+			return nil
+		}
 		if err := pairWithQRCode(client, logger); err != nil {
 			notifyOwner(logger, "WhatsApp pairing did not complete, so the bridge stops now.\n"+
 				"Restart the bridge to get a new QR code.\n\n<code>"+html.EscapeString(err.Error())+"</code>")
