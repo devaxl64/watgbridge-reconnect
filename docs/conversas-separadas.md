@@ -119,6 +119,31 @@
 **Atenção sobre persistência:** apenas 1 GB de disco efêmero no Northflank não garante sobreviver à substituição do contêiner. Para garantir a recuperação sem um serviço pago adicional, precisamos de registro/backup seguro e durável no próprio Telegram, ou aceitar novo QR quando perder a sessão. A política “a chave nova substitui a antiga” não pode apagar a última cópia válida antes de confirmar a nova.
 
 
+## Recuperação de sessão sem notebook — decisão de arquitetura
+
+**Objetivo:** se o contêiner do Northflank perder seu disco temporário, restaurar sessão de WhatsApp sem depender de computador.
+
+### Dados de sessão e cópias de segurança
+
+- A sessão WhatsApp está no banco SQLite `wawebstore.db` e inclui **chaves de autenticação e estado criptográfico**. Não são cookies de navegador; **nunca** publicar o arquivo em claro no fork público ou dentro de uma imagem Docker.
+- O serviço Northflank tem **1 GB de disco efêmero** para operação. Esse espaço continua disponível após reinícios, mas **o conteúdo escrito no disco é apagado quando o contêiner reinicia**. Secrets de configuração cadastrados no painel são um recurso diferente.
+- **Estratégia preferida:** após o WhatsApp parear, criar periodicamente um **snapshot SQLite consistente** do estado de sessão (sem copiar banco vivo de forma insegura). Criptografar localmente usando uma chave mantida num segredo do Northflank e enviar a versão criptografada a um **chat/canal privado de backup do Telegram**, com acesso restrito. Pin/registro de metadados permite recuperar o último backup sem depender de acesso ao histórico pelo bot.
+- Na inicialização: com o token do bot disponível na variável secreta do Northflank, recuperar a cópia do Telegram, verificar integridade, descriptografar em disco temporário e **só depois** inicializar o cliente WhatsApp. Enviar alerta único se restauração falhar; não gerar QR em loop.
+- **Rotação segura:** enviar e verificar o novo snapshot antes de excluir a versão anterior. Conservar ao menos a última cópia validada como rollback para falhas durante upload ou atualização. Se a chave do segredo se perder, o backup criptografado não poderá ser recuperado.
+- Bots via API hospedada podem ter limites de download; verificar tamanho real do snapshot do SQLite (até 20 MB para download normal por `getFile` em muitas configurações). O banco cresce com a sincronização; avaliar backup reduzido **consistente** das informações criptográficas essenciais.
+- **Alternativa GitHub:** possível somente com backup criptografado e credencial restrita de gravação; a integração GitHub de build do Northflank **não** significa acesso de escrita do contêiner ao repositório. GitHub público contém histórico permanente de commits; não subir sessão em claro nem token. Secrets do GitHub Actions não são um banco dinâmico para esse uso.
+- **Secret files Northflank:** adequados para chave de criptografia e configuração estática; não são substituto automático de volume SQLite gravável e persistente.
+- Um backup da sessão pode restaurar o dispositivo sem QR **enquanto a vinculação não tiver sido revogada pelo WhatsApp**; nunca prometer reconexão garantida após logout/revogação no celular.
+
+### Pareamento sem computador como plano B
+
+- A biblioteca `whatsmeow` oferece `PairPhone`, que gera **código de vinculação** em vez de depender exclusivamente da leitura do QR. Precisaremos adaptar o fork para mostrar o código na conversa privada com `@Wpp_TBot`, sob comando autorizado.
+- O WhatsApp oficial descreve entrada de código na tela `Dispositivos conectados -> Conectar dispositivo -> Conectar com número de telefone`. A disponibilidade pode depender do modo de cliente/conta; implementar e testar antes de prometer.
+- **Preferência:** ao detectar falha de restauração, permitir `/reconectar` ou `/codigo` no bot; não emitir novos QR Codes automaticamente em sequência. Não enviar senhas/chaves de sessão no chat, só código temporário de pareamento.
+- Esse recurso é uma recuperação de emergência. A prioridade é restaurar sessão do backup criptografado automaticamente e reutilizar os mesmos grupos Telegram sem duplicação.
+
+**Estado:** estas ações foram especificadas, **não implementadas nem validadas em produção**. Não mudar o Northflank atual até testes.
+
 ## Andamento
 
 - [x] Fork de trabalho criado.
