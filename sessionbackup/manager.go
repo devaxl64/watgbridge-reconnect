@@ -56,19 +56,27 @@ func (m *Manager) RestoreIfMissing(ctx context.Context) (bool, error) {
 	if !missing {
 		return false, nil
 	}
-	blob, err := m.store.Download(ctx)
+	blobs, err := m.store.DownloadCandidates(ctx)
 	if errors.Is(err, ErrNoBackup) {
 		return false, nil
 	}
 	if err != nil {
 		return false, err
 	}
-	files, err := Open(m.key, blob)
-	if err != nil {
-		return false, err
+	var restoreErr error
+	for _, blob := range blobs {
+		files, openErr := Open(m.key, blob)
+		if openErr != nil {
+			restoreErr = openErr
+			continue
+		}
+		count, err := RestoreMissing(files, m.paths)
+		return count > 0, err
 	}
-	count, err := RestoreMissing(files, m.paths)
-	return count > 0, err
+	if restoreErr == nil {
+		restoreErr = errors.New("no authenticated encrypted backup was available")
+	}
+	return false, restoreErr
 }
 
 // Save is safe to run while SQLite databases are live. Snapshots are generated
