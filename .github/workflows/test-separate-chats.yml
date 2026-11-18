@@ -1,0 +1,21 @@
+name: Test separate-chat routes
+
+on:
+  pull_request:
+    paths:
+      - 'database/**'
+      - 'go.mod'
+      - 'go.sum'
+      - '.github/workflows/test-separate-chats.yml'
+  workflow_dispatch:
+
+jobs:
+  routing-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Run routing tests
+        run: go test ./database
