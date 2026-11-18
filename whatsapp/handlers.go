@@ -39,6 +39,13 @@ func WhatsAppEventHandler(evt interface{}) {
 	switch v := evt.(type) {
 	case *events.Connected:
 		markBacklogCutoff()
+		StartJoinedGroupDiscovery()
+
+	case *events.HistorySync:
+		CaptureHistorySync(v)
+
+	case *events.JoinedGroup:
+		recordChatID(v.JID.String(), v.Name, "joined-group-event")
 
 	case *events.LoggedOut:
 		LogoutHandler(v)
@@ -69,6 +76,7 @@ func WhatsAppEventHandler(evt interface{}) {
 		UndecryptableMessageEventHandler(v)
 
 	case *events.Message:
+		CaptureIncomingChat(v)
 		handleMessageEvent(cfg, v)
 	}
 }
