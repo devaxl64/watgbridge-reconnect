@@ -48,6 +48,8 @@ func (m *Manager) Sync(ctx context.Context, maxNew int, botUsername string) (Rep
 		if err!=nil{return err} // never create groups on incomplete scan
 		report.Found=len(found)
 		for waID, ch:=range found {
+			_,wasLinked,lookupErr:=database.TelegramGroupForWhatsApp(waID)
+			if lookupErr!=nil{return lookupErr}
 			if err:=database.EnsureSeparateChat(waID,SupergroupID(ch.ID));err!=nil {
 				return fmt.Errorf("recovery conflict for %s: %w",waID,err)
 			}
@@ -56,7 +58,7 @@ func (m *Manager) Sync(ctx context.Context, maxNew int, botUsername string) (Rep
 			if err:=database.RecordKnownChat(database.KnownChat{
 				WaChatID:waID,Kind:kind,Name:ch.Title,Source:"telegram-recovery",
 			});err!=nil{return err}
-			report.Recovered++
+			if !wasLinked {report.Recovered++}
 		}
 		if maxNew==0{return nil}
 
@@ -68,6 +70,9 @@ func (m *Manager) Sync(ctx context.Context, maxNew int, botUsername string) (Rep
 			_,linked,err:=database.TelegramGroupForWhatsApp(chat.WaChatID)
 			if err!=nil{return err}
 			if linked {report.Skipped++;continue}
+			// A private LID without a verified phone-number mapping may
+			// later resolve to a PN and duplicate the same human contact.
+			if strings.HasSuffix(chat.WaChatID,"@lid") {report.Skipped++;continue}
 			// WhatsApp's LID identifiers do not necessarily contain a phone;
 			// never guess the number.
 			encoded,err:=routeidentity.Encrypt(chat.WaChatID)
@@ -197,7 +202,7 @@ func scanTelegramBridgeGroups(ctx context.Context,api *tg.Client)(map[string]*tg
 			full,err:=api.ChannelsGetFullChannel(ctx,&tg.ChannelsGetFullChannelRequest{
 				Channel:&tg.InputChannel{ChannelID:ch.ID,AccessHash:ch.AccessHash},
 			})
-			if err!=nil {continue} // an unrelated private group may be inaccessible
+			if err!=nil {return nil,fmt.Errorf("could not inspect Telegram group %d; no groups created: %w",ch.ID,err)}
 			info,ok:=full.FullChat.(*tg.ChannelFull)
 			if !ok {continue}
 			waID,isBridge,err:=routeidentity.Decrypt(info.About)
