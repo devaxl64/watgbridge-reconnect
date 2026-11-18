@@ -983,7 +983,7 @@ func (bc *bridgeContext) handleVideoMessage(v *events.Message) {
 	addCaption(&bc.bridgedText, videoMsg.GetCaption())
 
 	fileToSend := gotgbot.FileReader{
-		Name: "video." + strings.Split(videoMsg.GetMimetype(), "/")[1],
+		Name: videoFileName(videoMsg.GetMimetype()),
 		Data: videoFile,
 	}
 
