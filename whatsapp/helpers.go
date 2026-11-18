@@ -26,6 +26,7 @@ type bridgeContext struct {
 	waClient     *whatsmeow.Client
 	bridgedText  string
 	replyToMsgId int64
+	tgChatID     int64
 	threadId     int64
 	msgId        string
 	senderStr    string
@@ -39,7 +40,7 @@ func (bc *bridgeContext) savePair(sentMsg *gotgbot.Message) {
 	if sentMsg != nil && sentMsg.MessageId != 0 {
 		database.MsgIdAddNewPair(
 			bc.msgId, bc.senderStr, bc.chatStr,
-			bc.cfg.Telegram.TargetChatID,
+			bc.tgChatID,
 			sentMsg.MessageId, sentMsg.MessageThreadId,
 		)
 	}
@@ -49,7 +50,7 @@ func (bc *bridgeContext) savePair(sentMsg *gotgbot.Message) {
 // Telegram and saves the pair. Used when media cannot be sent.
 func (bc *bridgeContext) sendFallbackText(extraText string) {
 	sentMsg, _ := bc.tgBot.SendMessage(
-		bc.cfg.Telegram.TargetChatID,
+		bc.tgChatID,
 		bc.bridgedText+extraText,
 		&gotgbot.SendMessageOpts{
 			ReplyParameters: utils.TgMakeReplyParameters(bc.replyToMsgId, 0),
