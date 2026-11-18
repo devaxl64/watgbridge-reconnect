@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -215,10 +216,15 @@ func main() {
 	}
 	_ = logger.Sync()
 
-	// A Telegram USER session (MTProto) is needed to create true separate
-	// supergroups. Credentials are runtime secrets, never GitHub files.
-	// The encrypted Telegram backup was already restored above.
+	// The Telegram user login must NOT send numeric codes through a bot.
+	// Telegram invalidates any code shared in a chat. Use the official QR
+	// login instead: the bot delivers a short-lived QR photo to the owner.
+	var pendingQRMessageID int64
 	userClient, err := groupclient.NewFromEnvironment(func(message string) {
+		if message == "Conta Telegram autenticada. Agora é possível recuperar e criar grupos individuais." && pendingQRMessageID != 0 {
+			_, _ = state.State.TelegramBot.DeleteMessage(cfg.Telegram.OwnerID, pendingQRMessageID, nil)
+			pendingQRMessageID = 0
+		}
 		_, _ = state.State.TelegramBot.SendMessage(
 			cfg.Telegram.OwnerID, message, &gotgbot.SendMessageOpts{})
 	})
@@ -227,6 +233,20 @@ func main() {
 	}
 	groupclient.Register(userClient)
 	if userClient != nil {
+		userClient.SetQRNotifier(func(png []byte) error {
+			if pendingQRMessageID != 0 {
+				_, _ = state.State.TelegramBot.DeleteMessage(cfg.Telegram.OwnerID, pendingQRMessageID, nil)
+				pendingQRMessageID = 0
+			}
+			sent, err := state.State.TelegramBot.SendPhoto(
+				cfg.Telegram.OwnerID,
+				gotgbot.InputFileByReader("telegram-login.png", bytes.NewReader(png)),
+				&gotgbot.SendPhotoOpts{Caption: "No Telegram do CELULAR: Configurações -> Dispositivos -> Conectar dispositivo. Escaneie este QR exibido no computador. Não use /tgcodigo."},
+			)
+			if err != nil { return err }
+			pendingQRMessageID = sent.MessageId
+			return nil
+		})
 		userClient.Start(context.Background())
 	}
 
