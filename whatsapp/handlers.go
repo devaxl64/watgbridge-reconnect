@@ -593,7 +593,10 @@ func MessageFromMeEventHandler(text string, v *events.Message, isEdited bool, is
 		}
 	}
 
-	if state.State.Config.WhatsApp.SendMyMessagesFromOtherDevices {
+	if state.State.Config.WhatsApp.SendMyMessagesFromOtherDevices ||
+		state.State.Config.Telegram.SeparateChats {
+		// In dedicated mode, the Telegram conversation must also contain
+		// messages sent directly from WhatsApp or other linked devices.
 		MessageFromOthersEventHandler(text, v, isEdited, isDocument)
 	}
 }
@@ -1406,26 +1409,39 @@ func (bc *bridgeContext) handleTextOrReaction(text string, v *events.Message, is
 	var sentMsg *gotgbot.Message
 	var err error
 
-	if isEdited && !bc.cfg.WhatsApp.SendEditedMessageUpdates {
+	shouldEdit := isEdited && bc.replyToMsgId != 0 &&
+		(!bc.cfg.WhatsApp.SendEditedMessageUpdates || bc.cfg.Telegram.SeparateChats)
+	if shouldEdit {
+		var ok bool
 		if isDocument {
-			sentMsg, _, err = bc.tgBot.EditMessageCaption(&gotgbot.EditMessageCaptionOpts{
-				ChatId:    bc.tgChatID,
+			sentMsg, ok, err = bc.tgBot.EditMessageCaption(&gotgbot.EditMessageCaptionOpts{
+				ChatId: bc.tgChatID,
 				MessageId: bc.replyToMsgId,
-				Caption:   bc.bridgedText,
+				Caption: bc.bridgedText,
 			})
 		} else {
-			sentMsg, _, err = bc.tgBot.EditMessageText(&gotgbot.EditMessageTextOpts{
-				Text:               bc.bridgedText,
-				ChatId:             bc.tgChatID,
-				MessageId:          bc.replyToMsgId,
+			sentMsg, ok, err = bc.tgBot.EditMessageText(&gotgbot.EditMessageTextOpts{
+				Text: bc.bridgedText,
+				ChatId: bc.tgChatID,
+				MessageId: bc.replyToMsgId,
 				LinkPreviewOptions: &gotgbot.LinkPreviewOptions{},
 			})
 		}
-	} else {
+		if err == nil && ok && sentMsg == nil {
+			sentMsg = &gotgbot.Message{MessageId: bc.replyToMsgId}
+		}
+		// Messages edited outside Telegram's supported window must still be
+		// visible as a new "Editado" notice instead of silently disappearing.
+		if err != nil || !ok {
+			if bc.logger != nil { bc.logger.Warn("could not edit bridged Telegram message in place", zap.Error(err)) }
+			shouldEdit = false
+		}
+	}
+	if !shouldEdit {
 		sentMsg, err = bc.tgBot.SendMessage(bc.tgChatID, bc.bridgedText,
 			&gotgbot.SendMessageOpts{
-				ReplyParameters:    utils.TgMakeReplyParameters(bc.replyToMsgId, 0),
-				MessageThreadId:    bc.threadId,
+				ReplyParameters: utils.TgMakeReplyParameters(bc.replyToMsgId, 0),
+				MessageThreadId: bc.threadId,
 				LinkPreviewOptions: &gotgbot.LinkPreviewOptions{},
 			})
 	}
