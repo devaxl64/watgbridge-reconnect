@@ -50,3 +50,41 @@ func TestRecordKnownChatRejectsInvalid(t *testing.T) {
 	if err:=recordKnownChat(db,KnownChat{Kind:"private"});err==nil { t.Fatal("blank chat accepted") }
 	if err:=recordKnownChat(db,KnownChat{WaChatID:"id",Kind:"broadcast"});err==nil { t.Fatal("broadcast accepted") }
 }
+
+func TestPlaceholderZeroChatCannotReenterCatalog(t *testing.T) {
+	db := knownChatsTestDB(t)
+	for _, id := range []string{"0@s.whatsapp.net", "0@lid"} {
+		if err := recordKnownChat(db, KnownChat{WaChatID:id, Kind:"private"}); err == nil {
+			t.Fatalf("placeholder %q unexpectedly accepted", id)
+		}
+		if IsActionableKnownChat(KnownChat{WaChatID:id, Kind:"private"}) {
+			t.Fatalf("placeholder %q must never have a dedicated group", id)
+		}
+	}
+}
+
+func TestOldPlaceholderRouteExcludedWithoutDeletingGroup(t *testing.T) {
+	db := knownChatsTestDB(t)
+	// Emulate a previous deployment that had already created Telegram group "0".
+	if err := db.Create(&KnownChat{WaChatID:"0@s.whatsapp.net", Kind:"private", Name:"0"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := bindSeparateChat(db, "0@s.whatsapp.net", -1001234567890); err != nil {
+		t.Fatal(err)
+	}
+	if err := recordKnownChat(db, KnownChat{WaChatID:"5511999999999@s.whatsapp.net", Kind:"private"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := bindSeparateChat(db, "5511999999999@s.whatsapp.net", -1009876543210); err != nil {
+		t.Fatal(err)
+	}
+	stats, err := getKnownChatStats(db)
+	if err != nil { t.Fatal(err) }
+	if stats.Total != 1 || stats.Linked != 1 || stats.Private != 1 {
+		t.Fatalf("old placeholder should be hidden: %+v", stats)
+	}
+	var existing ChatRoute
+	if err := db.Where("wa_chat_id = ?", "0@s.whatsapp.net").First(&existing).Error; err != nil {
+		t.Fatal("old Telegram group route should not be deleted automatically:", err)
+	}
+}
