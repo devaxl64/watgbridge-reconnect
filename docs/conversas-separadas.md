@@ -178,6 +178,18 @@ Na restauração de sessão existente, **não assumir que o WhatsApp enviará a 
 
 Após compor a lista, criar/reutilizar grupos de Telegram em lotes controlados para evitar limites de requisição, com associação única e nomes/fotos conforme especificação. **Implementação futura na PR de conversas separadas**; a PR de backup de sessão apenas recupera autenticação/bancos, não cria os grupos.
 
+## Processamento por prioridade e uso de memória (decisão final)
+
+- **Primeiro**, recuperar lista de chats, contatos e grupos. Não importar mídia nem mensagens antigas em massa apenas para construir a lista.
+- **Mensagens de texto, edição, exclusão e respostas**: encaminhar imediatamente, sem ficar atrás de vídeos/documents na fila.
+- **Mídias em fila única de execução**, com três prioridades: (1) documentos e áudio, (2) fotos e figurinhas, (3) vídeos e animações. É uma ordem de prioridade entre transferências pendentes, sem interromper uma transferência já iniciada.
+- **Prévias de links**: o Telegram pode gerá-las automaticamente a partir da URL enviada com o texto; não é uma etapa pesada que precise aguardar vídeos. A disponibilidade depende do site e das opções do aplicativo.
+- **RAM de 256 MB**: o WhatsApp disponibiliza `DownloadToFile`, que escreve arquivos no disco por fluxo. A ponte foi adaptada para transferir fotos, documentos, áudio e vídeos por arquivo temporário, em vez de manter o conteúdo completo em `[]byte`. Conversões de figurinhas ainda exigem RAM e foram limitadas a 8 MiB de entrada.
+- **Disco de 1 GB efêmero**: até 600 MiB de mídias temporárias em andamento, com verificação de espaço realmente livre e margem de 100 MiB; 300 MiB reservados nominalmente para o estado de trabalho. Os arquivos temporários são apagados após a tentativa de entrega ao Telegram.
+- **O limite do Telegram para arquivos recebidos pelo bot normal continua existindo**, independentemente da cota do disco. A cota de 600 MiB não obriga nem habilita uploads de 600 MiB.
+- As filas de mídia são limitadas para não consumir RAM sem controle. Se a fila encher, enviar aviso ao proprietário e preservar a mensagem original no WhatsApp; essa contingência não equivale a entrega garantida de mídia.
+- **Implementado na branch de testes**: `whatsapp/media_queue.go`, `whatsapp/helpers.go`, `whatsapp/handlers.go`. **Ainda não implantado nem testado em conta real**; verificar compilação do GitHub Actions antes de ativar.
+
 ## Andamento
 
 - [x] Fork de trabalho criado.
