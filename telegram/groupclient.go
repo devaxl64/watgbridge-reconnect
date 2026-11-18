@@ -111,6 +111,9 @@ func SyncDedicatedGroupsHandler(bot *gotgbot.Bot,ctx *ext.Context)error{
 		}
 		count=n
 	}
+	// An explicit recovery-only command must rescan Telegram even when an
+	// earlier automatic batch already cached its catalog.
+	if count == 0 { manager.ForceRemoteRecovery() }
 	_,err:=utils.TgReplyTextByContext(bot,ctx,
 		fmt.Sprintf("Recuperando os grupos existentes. Novos grupos autorizados neste lote: %d.",count),nil,false)
 	if err!=nil{return err}
