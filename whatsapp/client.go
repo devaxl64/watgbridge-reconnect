@@ -297,6 +297,10 @@ func NewWhatsAppClientWithPairing(deferPairing bool) error {
 	client := whatsmeow.NewClient(deviceStore, waClientLogger)
 	state.State.WhatsAppClient = client
 
+	// Register the event handler BEFORE Connect. WhatsApp can emit its initial
+	// history sync during login; registering afterwards silently loses it.
+	client.AddEventHandler(WhatsAppEventHandler)
+
 	if client.Store.ID == nil {
 		if deferPairing {
 			logger.Warn("WhatsApp session unavailable; awaiting owner pairing command /codigo")
