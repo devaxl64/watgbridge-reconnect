@@ -7,6 +7,7 @@ require (
 	github.com/emersion/go-vcard v0.1.0
 	github.com/forPelevin/gomoji v1.4.1
 	github.com/go-co-op/gocron v1.37.0
+	github.com/gotd/td v0.162.0
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/lithammer/fuzzysearch v1.1.8
 	github.com/mattn/go-sqlite3 v1.14.52
