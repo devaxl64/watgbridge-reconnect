@@ -62,7 +62,7 @@ func (m *Manager) Sync(ctx context.Context, maxNew int, botUsername string) (Rep
 		}
 		if maxNew==0{return nil}
 
-		chats,err:=database.ListAllKnownChats(5000)
+		chats,err:=database.ListAllKnownChats(0)
 		if err!=nil{return err}
 		for _,chat:=range chats {
 			if report.Created>=maxNew {break}
