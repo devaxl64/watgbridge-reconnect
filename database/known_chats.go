@@ -133,3 +133,13 @@ func SetKnownAvatarVersion(waChatID, pictureID string) error {
 			"picture_checked_at": time.Now().UTC(),
 		}).Error
 }
+
+// ListAllKnownChats returns a bounded batch in a stable order for MTProto
+// provisioning. It does not expose historical messages or media.
+func ListAllKnownChats(limit int) ([]KnownChat,error) {
+	if state.State.Database==nil {return nil,errors.New("bridge database unavailable")}
+	if limit<=0||limit>5000 {limit=5000}
+	var out []KnownChat
+	err:=state.State.Database.Order("wa_chat_id ASC").Limit(limit).Find(&out).Error
+	return out,err
+}
