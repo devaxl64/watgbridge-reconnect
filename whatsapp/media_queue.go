@@ -163,7 +163,7 @@ func pendingMediaText(v *events.Message) string {
 // Before completion, this text does not claim to be downloadable.
 func showPendingMedia(cfg *state.Config, v *events.Message) mediaPlaceholder {
 	if cfg == nil || !cfg.Telegram.SeparateChats || state.State.TelegramBot == nil ||
-		(v.Info.IsFromMe && !cfg.WhatsApp.SendMyMessagesFromOtherDevices) {
+		(v.Info.IsFromMe && !cfg.WhatsApp.SendMyMessagesFromOtherDevices && !cfg.Telegram.SeparateChats) {
 		return mediaPlaceholder{}
 	}
 	id, found, err := database.TelegramGroupForWhatsApp(CanonicalChatJID(v.Info.Chat).String())
