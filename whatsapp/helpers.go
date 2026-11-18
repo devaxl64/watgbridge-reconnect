@@ -223,6 +223,32 @@ func (bc *bridgeContext) downloadMediaToTemp(message whatsmeow.DownloadableMessa
 	return file,cleanup,nil
 }
 
+// senderPhone extracts a WhatsApp-provided phone-number JID.
+// LIDs are opaque identifiers and must never be guessed as phone numbers.
+func senderPhone(jid waTypes.JID) string {
+	if jid.Server != "s.whatsapp.net" || jid.User == "" { return "" }
+	raw := jid.User
+	for _, digit := range raw {
+		if digit < '0' || digit > '9' { return "" }
+	}
+	if strings.HasPrefix(raw, "55") && len(raw) >= 12 { return raw[2:] }
+	return raw
+}
+
+// groupSenderLabel shows the name and verified phone (if the WhatsApp event
+// provides one) without confusing a LID with a Brazilian number.
+func groupSenderLabel(name string, sender, senderAlt waTypes.JID) string {
+	number := senderPhone(sender)
+	if number == "" { number = senderPhone(senderAlt) }
+	name = strings.TrimSpace(name)
+	if number == "" { return name }
+	if name == "" || name == number || name == "55"+number || name == "+55"+number {
+		return number
+	}
+	if strings.Contains(name, number) { return name }
+	return name + " (" + number + ")"
+}
+
 // videoFileName handles absent or malformed WhatsApp MIME types safely.
 // A corrupted or unexpected MIME label must never crash the entire bridge.
 func videoFileName(contentType string) string {
