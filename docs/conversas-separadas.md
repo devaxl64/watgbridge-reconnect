@@ -170,6 +170,8 @@
 
 ## Importação automática de todas as conversas após login/restauração
 
+**Autorização do proprietário para a implantação futura:** quando a recuperação completa de conversas estiver implementada e testada, é aceitável **reiniciar o serviço e refazer o pareamento da sessão WhatsApp, se necessário**, para provocar a sincronização inicial de conversas. Isso **não autoriza desconectar ou apagar a sessão atual antecipadamente**; primeiro validar a nova versão, preservar cópias seguras e preparar a reconexão pelo celular. Reiniciar o processo ou restaurar credenciais não é o mesmo que forçar uma nova sincronização de histórico: se for indispensável, refazer o vínculo do aparelho por código/QR conforme necessário. A sincronização pode não devolver todos os chats antigos.\n\n
+
 **Requisito:** não esperar cada contato enviar mensagem para aparecer na lista do Telegram. Na primeira vinculação, aproveitar os eventos de sincronização inicial do WhatsApp (`events.HistorySync`) para descobrir conversas individuais **inclusive não salvas nos contatos**, e os grupos. Coletar **apenas metadados** de chats (JID/LID, número quando possível, nome, tipo, foto), sem importar todo o histórico de mensagens nem mídia antiga.
 
 Na restauração de sessão existente, **não assumir que o WhatsApp enviará a lista inteira novamente**, pois a sincronização inicial pode ocorrer apenas no primeiro pareamento. Primeiro reconstruir a lista com os vínculos/registro permanente no próprio Telegram; completar com dados do cliente WhatsApp e conversas identificadas por novos eventos. Não apagar chats existentes nem criar duplicados quando faltarem dados. Se a lista estiver incompleta, não prometer 100% de recuperação imediata. Testar também contas que têm muitas conversas.
