@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"html"
 	"strings"
+	"strconv"
 
 	"watgbridge/database"
 	"watgbridge/routeidentity"
@@ -58,15 +59,33 @@ func ConversationsCommandHandler(bot *gotgbot.Bot, ctx *ext.Context) error {
 	)
 	result += "O catálogo contém apenas identificadores e nomes, sem histórico de mensagens. "+
 		"Na primeira vinculação, o WhatsApp pode enviar mais conversas que numa simples reconexão.\n"+
-		"Use <code>/conversas lista</code> para listar até 20 conversas ou "+
+		"Use <code>/conversas lista</code> ou <code>/conversas lista 2</code> para consultar todas as páginas, ou "+
 		"<code>/conversas atualizar</code> para consultar novamente os grupos."
 
 	if len(ctx.Args()) > 1 && strings.EqualFold(ctx.Args()[1], "lista") {
-		chats, err := database.ListKnownChats(20)
+		page := 1
+		if len(ctx.Args()) > 2 {
+			n, parseErr := strconv.Atoi(ctx.Args()[2])
+			if parseErr != nil || n < 1 {
+				_, err := utils.TgReplyTextByContext(bot, ctx,
+					"Informe uma página válida. Exemplo: /conversas lista 2", nil, false)
+				return err
+			}
+			page = n
+		}
+		const pageSize = 20 // Telegram message size, NOT a limit on synced conversations.
+		pages := int((stats.Total + pageSize - 1) / pageSize)
+		if pages == 0 { pages = 1 }
+		if page > pages {
+			_, err := utils.TgReplyTextByContext(bot, ctx,
+				fmt.Sprintf("Página %d não existe. Última página: %d.", page, pages), nil, false)
+			return err
+		}
+		chats, err := database.ListKnownChatsPage(page, pageSize)
 		if err != nil {
 			return utils.TgReplyWithErrorByContext(bot, ctx, "Não consegui listar as conversas", err)
 		}
-		result += "\n\n<b>Conversas mais recentes</b>\n"
+		result += fmt.Sprintf("\n\n<b>Conversas — página %d de %d</b>\n", page, pages)
 		for _, chat := range chats {
 			label := strings.TrimSpace(chat.Name)
 			if label == "" {
@@ -87,6 +106,9 @@ func ConversationsCommandHandler(bot *gotgbot.Bot, ctx *ext.Context) error {
 				typeName = "Grupo"
 			}
 			result += fmt.Sprintf("• %s: %s\n", typeName, html.EscapeString(label))
+		}
+		if page < pages {
+			result += fmt.Sprintf("\nPróxima página: <code>/conversas lista %d</code>", page+1)
 		}
 	}
 	_, err = utils.TgReplyTextByContext(bot, ctx, result, nil, false)
