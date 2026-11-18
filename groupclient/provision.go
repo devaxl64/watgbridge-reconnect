@@ -180,7 +180,10 @@ func scanTelegramBridgeGroups(ctx context.Context,api *tg.Client)(map[string]*tg
 	req:=&tg.MessagesGetDialogsRequest{
 		Limit:100,OffsetPeer:&tg.InputPeerEmpty{},
 	}
-	for page:=0;page<50;page++{
+	// Never cap recovery at 50 pages: accounts with many dialogs need full
+	// traversal. The caller's context timeout is the operational boundary.
+	for {
+		if err := ctx.Err(); err != nil { return nil, err }
 		res,err:=api.MessagesGetDialogs(ctx,req)
 		if err!=nil{return nil,err}
 		var dialogs []tg.DialogClass
