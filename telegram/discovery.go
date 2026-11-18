@@ -2,12 +2,11 @@ package telegram
 
 import (
 	"fmt"
-	"crypto/sha256"
-	"encoding/hex"
 	"html"
 	"strings"
 
 	"watgbridge/database"
+	"watgbridge/routeidentity"
 	"watgbridge/state"
 	"watgbridge/utils"
 	"watgbridge/whatsapp"
@@ -132,26 +131,52 @@ func LinkDedicatedGroupHandler(bot *gotgbot.Bot, ctx *ext.Context) error {
 		return replyErr
 	}
 	waChatID := jid.ToNonAD().String()
+	// Validate both sides BEFORE modifying a Telegram group's public
+	// metadata. Refuse to touch groups already bound to a different chat.
+	if tgID, linked, err := database.TelegramGroupForWhatsApp(waChatID); err!=nil {
+		return utils.TgReplyWithErrorByContext(bot,ctx,"Falha na consulta de vínculos",err)
+	} else if linked && tgID!=ctx.EffectiveChat.Id {
+		_,replyErr:=utils.TgReplyTextByContext(bot,ctx,
+			"Essa conversa já está vinculada a outro grupo. Não vou duplicá-la.",nil,false)
+		return replyErr
+	}
+	if old, linked, err := database.WhatsAppChatForTelegramGroup(ctx.EffectiveChat.Id); err!=nil {
+		return utils.TgReplyWithErrorByContext(bot,ctx,"Falha na consulta do grupo",err)
+	} else if linked && old!=waChatID {
+		_,replyErr:=utils.TgReplyTextByContext(bot,ctx,
+			"Este grupo já pertence a outra conversa.",nil,false)
+		return replyErr
+	}
+	tag, err := routeidentity.Encrypt(waChatID)
+	if err != nil {
+		return utils.TgReplyWithErrorByContext(bot,ctx,
+			"É necessário configurar a chave segura WATG_BACKUP_KEY",err)
+	}
+	chat,err:=bot.GetChat(ctx.EffectiveChat.Id,nil)
+	if err!=nil{return utils.TgReplyWithErrorByContext(bot,ctx,"Não consegui consultar a descrição",err)}
+	if chat.Description!="" {
+		existing,tagged,err:=routeidentity.Decrypt(chat.Description)
+		if err!=nil || !tagged || existing!=waChatID {
+			_,replyErr:=utils.TgReplyTextByContext(bot,ctx,
+				"Grupo já tem uma descrição diferente. Não vou alterar ou vincular automaticamente.",nil,false)
+			return replyErr
+		}
+	}
+	if chat.Description!=tag {
+		ok,err:=bot.SetChatDescription(ctx.EffectiveChat.Id,
+			&gotgbot.SetChatDescriptionOpts{Description:tag})
+		if err!=nil || !ok {
+			return utils.TgReplyWithErrorByContext(bot,ctx,
+				"É preciso tornar o bot administrador com permissão para editar o grupo",err)
+		}
+	}
 	err = database.EnsureSeparateChat(waChatID, ctx.EffectiveChat.Id)
 	if err != nil {
 		return utils.TgReplyWithErrorByContext(bot, ctx,
 			"Vínculo recusado para evitar conversas duplicadas", err)
 	}
-
-	// A non-sensitive fingerprint in the group description will later let
-	// the user MTProto importer find the same group after a local DB loss.
-	sum := sha256.Sum256([]byte(waChatID))
-	tag := "WATGBRIDGE-ID:" + hex.EncodeToString(sum[:12])
-	remoteSaved := false
-	if chat, getErr := bot.GetChat(ctx.EffectiveChat.Id, nil); getErr == nil &&
-		(chat.Description == "" || chat.Description == tag) {
-		remoteSaved, _ = bot.SetChatDescription(ctx.EffectiveChat.Id,
-			&gotgbot.SetChatDescriptionOpts{Description: tag})
-	}
-	msg := "Conversa vinculada. Mensagens dessa conversa poderão usar este grupo do Telegram."
-	if !remoteSaved {
-		msg += "\nA identificação remota não foi atualizada; o bot precisa ser administrador com permissão para editar o grupo."
-	}
-	_, err = utils.TgReplyTextByContext(bot, ctx, msg, nil, false)
+	_, err = utils.TgReplyTextByContext(bot, ctx,
+		"Conversa vinculada e identificação criptografada guardada no Telegram. "+
+			"Ela poderá ser recuperada sem duplicações após um reinício.", nil, false)
 	return err
 }
