@@ -484,7 +484,7 @@ func TgSendToWhatsApp(b *gotgbot.Bot, c *ext.Context,
 		SendMessageConfirmation(b, c, cfg, msgToForward, revokeKeyboard)
 
 		err = database.MsgIdAddNewPair(sentMsg.ID, waClient.Store.ID.String(), waChatJID.String(),
-			cfg.Telegram.TargetChatID, msgToForward.MessageId, msgToForward.MessageThreadId)
+			c.EffectiveChat.Id, msgToForward.MessageId, msgToForward.MessageThreadId)
 		if err != nil {
 			return TgReplyWithErrorByContext(b, c, "Failed to add to database", err)
 		}
@@ -554,7 +554,7 @@ func TgSendToWhatsApp(b *gotgbot.Bot, c *ext.Context,
 		SendMessageConfirmation(b, c, cfg, msgToForward, revokeKeyboard)
 
 		err = database.MsgIdAddNewPair(sentMsg.ID, waClient.Store.ID.String(), waChatJID.String(),
-			cfg.Telegram.TargetChatID, msgToForward.MessageId, msgToForward.MessageThreadId)
+			c.EffectiveChat.Id, msgToForward.MessageId, msgToForward.MessageThreadId)
 		if err != nil {
 			return TgReplyWithErrorByContext(b, c, "Failed to add to database", err)
 		}
@@ -621,7 +621,7 @@ func TgSendToWhatsApp(b *gotgbot.Bot, c *ext.Context,
 		SendMessageConfirmation(b, c, cfg, msgToForward, revokeKeyboard)
 
 		err = database.MsgIdAddNewPair(sentMsg.ID, waClient.Store.ID.String(), waChatJID.String(),
-			cfg.Telegram.TargetChatID, msgToForward.MessageId, msgToForward.MessageThreadId)
+			c.EffectiveChat.Id, msgToForward.MessageId, msgToForward.MessageThreadId)
 		if err != nil {
 			return TgReplyWithErrorByContext(b, c, "Failed to add to database", err)
 		}
@@ -691,7 +691,7 @@ func TgSendToWhatsApp(b *gotgbot.Bot, c *ext.Context,
 		SendMessageConfirmation(b, c, cfg, msgToForward, revokeKeyboard)
 
 		err = database.MsgIdAddNewPair(sentMsg.ID, waClient.Store.ID.String(), waChatJID.String(),
-			cfg.Telegram.TargetChatID, msgToForward.MessageId, msgToForward.MessageThreadId)
+			c.EffectiveChat.Id, msgToForward.MessageId, msgToForward.MessageThreadId)
 		if err != nil {
 			return TgReplyWithErrorByContext(b, c, "Failed to add to database", err)
 		}
@@ -762,7 +762,7 @@ func TgSendToWhatsApp(b *gotgbot.Bot, c *ext.Context,
 		SendMessageConfirmation(b, c, cfg, msgToForward, revokeKeyboard)
 
 		err = database.MsgIdAddNewPair(sentMsg.ID, waClient.Store.ID.String(), waChatJID.String(),
-			cfg.Telegram.TargetChatID, msgToForward.MessageId, msgToForward.MessageThreadId)
+			c.EffectiveChat.Id, msgToForward.MessageId, msgToForward.MessageThreadId)
 		if err != nil {
 			return TgReplyWithErrorByContext(b, c, "Failed to add to database", err)
 		}
@@ -833,7 +833,7 @@ func TgSendToWhatsApp(b *gotgbot.Bot, c *ext.Context,
 		SendMessageConfirmation(b, c, cfg, msgToForward, revokeKeyboard)
 
 		err = database.MsgIdAddNewPair(sentMsg.ID, waClient.Store.ID.String(), waChatJID.String(),
-			cfg.Telegram.TargetChatID, msgToForward.MessageId, msgToForward.MessageThreadId)
+			c.EffectiveChat.Id, msgToForward.MessageId, msgToForward.MessageThreadId)
 		if err != nil {
 			return TgReplyWithErrorByContext(b, c, "Failed to add to database", err)
 		}
@@ -896,7 +896,7 @@ func TgSendToWhatsApp(b *gotgbot.Bot, c *ext.Context,
 		SendMessageConfirmation(b, c, cfg, msgToForward, revokeKeyboard)
 
 		err = database.MsgIdAddNewPair(sentMsg.ID, waClient.Store.ID.String(), waChatJID.String(),
-			cfg.Telegram.TargetChatID, msgToForward.MessageId, msgToForward.MessageThreadId)
+			c.EffectiveChat.Id, msgToForward.MessageId, msgToForward.MessageThreadId)
 		if err != nil {
 			return TgReplyWithErrorByContext(b, c, "Failed to add to database", err)
 		}
@@ -985,7 +985,7 @@ func TgSendToWhatsApp(b *gotgbot.Bot, c *ext.Context,
 		SendMessageConfirmation(b, c, cfg, msgToForward, revokeKeyboard)
 
 		err = database.MsgIdAddNewPair(sentMsg.ID, waClient.Store.ID.String(), waChatJID.String(),
-			cfg.Telegram.TargetChatID, msgToForward.MessageId, msgToForward.MessageThreadId)
+			c.EffectiveChat.Id, msgToForward.MessageId, msgToForward.MessageThreadId)
 		if err != nil {
 			return TgReplyWithErrorByContext(b, c, "Failed to add to database", err)
 		}
@@ -1046,7 +1046,7 @@ func TgSendToWhatsApp(b *gotgbot.Bot, c *ext.Context,
 		SendMessageConfirmation(b, c, cfg, msgToForward, revokeKeyboard)
 
 		err = database.MsgIdAddNewPair(sentMsg.ID, waClient.Store.ID.String(), waChatJID.String(),
-			cfg.Telegram.TargetChatID, msgToForward.MessageId, msgToForward.MessageThreadId)
+			c.EffectiveChat.Id, msgToForward.MessageId, msgToForward.MessageThreadId)
 		if err != nil {
 			return TgReplyWithErrorByContext(b, c, "Failed to add to database", err)
 		}
@@ -1096,7 +1096,7 @@ func TgSendToWhatsApp(b *gotgbot.Bot, c *ext.Context,
 		SendMessageConfirmation(b, c, cfg, msgToForward, revokeKeyboard)
 
 		err = database.MsgIdAddNewPair(sentMsg.ID, waClient.Store.ID.String(), waChatJID.String(),
-			cfg.Telegram.TargetChatID, msgToForward.MessageId, msgToForward.MessageThreadId)
+			c.EffectiveChat.Id, msgToForward.MessageId, msgToForward.MessageThreadId)
 		if err != nil {
 			return TgReplyWithErrorByContext(b, c, "Failed to add to database", err)
 		}
@@ -1159,7 +1159,7 @@ func TgSendToWhatsApp(b *gotgbot.Bot, c *ext.Context,
 		SendMessageConfirmation(b, c, cfg, msgToForward, revokeKeyboard)
 
 		err = database.MsgIdAddNewPair(sentMsg.ID, waClient.Store.ID.String(), waChatJID.String(),
-			cfg.Telegram.TargetChatID, msgToForward.MessageId, msgToForward.MessageThreadId)
+			c.EffectiveChat.Id, msgToForward.MessageId, msgToForward.MessageThreadId)
 		if err != nil {
 			return TgReplyWithErrorByContext(b, c, "Failed to add to database", err)
 		}
