@@ -240,6 +240,16 @@ func BridgeTelegramToWhatsAppHandler(b *gotgbot.Bot, c *ext.Context) error {
 		}
 	}
 
+	// Files above the supported size are never forwarded to WhatsApp.
+	// Respond inside the same Telegram chat, replying to the attempted file,
+	// without reading its bytes or sending even its caption to WhatsApp.
+	if notice := utils.TgOutgoingMediaLimitNotice(
+		c.EffectiveMessage, state.State.Config.Telegram.SelfHostedAPI,
+	); notice != "" {
+		_, err := utils.TgReplyTextByContext(b, c, notice, nil, false)
+		return err
+	}
+
 	var (
 		waClient     = state.State.WhatsAppClient
 		msgToForward = c.EffectiveMessage
