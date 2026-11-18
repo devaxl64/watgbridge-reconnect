@@ -1139,7 +1139,7 @@ func (bc *bridgeContext) handleStickerMessage(v *events.Message) {
 		// Fallback: try GIF conversion
 		if gifBytes, err := utils.AnimatedWebpConvertToGif(stickerBytes, v.Info.ID); err == nil {
 			sentMsg, _ := bc.tgBot.SendAnimation(bc.tgChatID,
-				&gotgbot.FileReader{Name: "animation.gif", Data: gifFile},
+				&gotgbot.FileReader{Name: "animation.gif", Data: bytes.NewReader(gifBytes)},
 				&gotgbot.SendAnimationOpts{
 					Caption:         bc.bridgedText,
 					ReplyParameters: utils.TgMakeReplyParameters(bc.replyToMsgId, 0),
