@@ -25,6 +25,9 @@ const (
 )
 
 var expectedFiles = []string{"wawebstore.db", "gobot.sqlite.db"}
+// The MTProto user session is small and optional: a bridge can be backed up
+// before the owner's Telegram account has completed its first sign-in.
+const optionalSession = "telegram-user.json"
 
 // KeyFromEnvironment accepts exactly 32 random bytes in standard base64.
 // This variable must be a Northflank runtime secret, never a repository file.
@@ -49,8 +52,11 @@ func Seal(key []byte, files map[string][]byte) ([]byte, error) {
 	var plain bytes.Buffer
 	zipWriter := gzip.NewWriter(&plain)
 	tarWriter := tar.NewWriter(zipWriter)
-	for _, name := range expectedFiles {
+	for _, name := range append(append([]string{}, expectedFiles...), optionalSession) {
 		data, ok := files[name]
+		if name == optionalSession && (!ok || len(data) == 0) {
+			continue
+		}
 		if !ok || len(data) == 0 {
 			return nil, fmt.Errorf("missing or empty database snapshot: %s", name)
 		}
@@ -134,7 +140,7 @@ func Open(key, blob []byte) (map[string][]byte, error) {
 		if header.Typeflag != tar.TypeReg {
 			return nil, errors.New("unexpected archive entry type")
 		}
-		if header.Name != "wawebstore.db" && header.Name != "gobot.sqlite.db" {
+		if header.Name != "wawebstore.db" && header.Name != "gobot.sqlite.db" && header.Name != optionalSession {
 			return nil, errors.New("unknown archive entry name")
 		}
 		if _, duplicate := files[header.Name]; duplicate || header.Size <= 0 || header.Size > MaxPlainFileSize {
@@ -161,9 +167,10 @@ func Open(key, blob []byte) (map[string][]byte, error) {
 // before either SQLite database is opened. Files are written 0600 atomically.
 func RestoreMissing(files map[string][]byte, paths map[string]string) (int, error) {
 	restored := 0
-	for _, name := range expectedFiles {
+	for _, name := range append(append([]string{}, expectedFiles...), optionalSession) {
 		path := paths[name]
 		data := files[name]
+		if name == optionalSession && len(data) == 0 { continue }
 		if path == "" || len(data) == 0 {
 			return restored, fmt.Errorf("missing path or data for %s", name)
 		}
