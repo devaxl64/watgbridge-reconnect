@@ -1,0 +1,50 @@
+name: MTProto integration and final compile
+
+on:
+  push:
+    branches:
+      - feature/separate-chats
+    paths:
+      - 'groupclient/**'
+      - 'routeidentity/**'
+      - 'telegram/**'
+      - 'whatsapp/**'
+      - 'database/**'
+      - 'sessionbackup/**'
+      - 'main.go'
+      - 'go.mod'
+      - 'go.sum'
+      - '.github/workflows/mtproto-compile.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  integration:
+    if: github.repository == 'devaxl64/watgbridge-reconnect'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/separate-chats
+          persist-credentials: true
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Resolve exact dependencies
+        run: go mod tidy
+      - name: Test all packages
+        run: go test ./...
+      - name: Verify entire project compiles
+        run: go build ./...
+      - name: Persist generated go.sum only on working feature branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add go.mod go.sum
+          if ! git diff --cached --quiet; then
+            git commit -m "build: synchronize MTProto dependency checksums"
+            git push origin HEAD:feature/separate-chats
+          fi
