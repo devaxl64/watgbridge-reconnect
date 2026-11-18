@@ -230,8 +230,8 @@ A versão personalizada **ainda não está pronta para implantação**. O branch
 ## Regra de arquivos enviados do Telegram ao WhatsApp (18/11/2026)
 
 - O proprietário pode anexar mídias normalmente no grupo Telegram correspondente a uma conversa WhatsApp. Antes de transmitir qualquer dado ao WhatsApp, o bot verifica o tamanho anunciado pelo Telegram (foto, vídeo, vídeo circular, animação, áudio, mensagem de voz, documento ou figurinha).
-- Se o arquivo for **maior que 50 MiB**, o bot responde à própria mensagem no mesmo grupo Telegram: `Limite de envio: 50 MB (arquivo: 63,5 MB). Nada foi enviado ao WhatsApp.` O número é o tamanho efetivo da tentativa, com uma casa decimal e vírgula.
-- Quando a Bot API hospedada oficial for usada, **o download pelo bot é limitado a 20 MiB**. Para arquivo maior que esse limite, até 50 MiB, o bot responde no Telegram informando especificamente o limite de 20 MB e o tamanho da tentativa, sem enviar ao WhatsApp. Isso não deve ser confundido com os 50 MB de *upload* que a API permite ao bot.
+- Se o arquivo for **maior que 50 MiB**, o bot responde à própria mensagem no mesmo grupo Telegram: `Não foi possível baixar o arquivo (63,5 MB). Limite configurado: 50 MB.` O número é o tamanho efetivo da tentativa, com uma casa decimal e vírgula.
+- Quando a Bot API hospedada oficial for usada, **o download pelo bot é limitado a 20 MiB**. Para arquivo maior que esse limite, até 50 MiB, o bot responde no Telegram informando especificamente o limite de 20 MB e o tamanho da tentativa, sem baixar o arquivo. Isso não deve ser confundido com os 50 MB de *upload* que a API permite ao bot.
 - Os avisos são exclusivamente locais no Telegram (resposta à mensagem original); nem a mídia nem sua legenda são enviadas ao WhatsApp. O bot não tenta baixar arquivos já identificados como excessivos.
 - Para arquivos de tamanho desconhecido nos metadados, não inventar tamanho; a tentativa normal permanece sujeita às validações e erros de `getFile`.
 - É uma regra para **Telegram → WhatsApp**, independente da fila WhatsApp → Telegram e do orçamento de 600 MiB de espaço temporário.
