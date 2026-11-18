@@ -8,90 +8,161 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
 )
 
 func TestTelegramEncryptedPinnedBackupLifecycle(t *testing.T) {
+	type document struct {
+		id int64
+		fileID string
+		caption string
+		bytes []byte
+	}
 	var mu sync.Mutex
-	var document []byte
-	var pinned bool
-	var sendCount, editCount int
-	const fileID = "backup-document"
-	mux := http.NewServeMux()
+	docs := map[string]*document{}
+	var pinnedID int64
+	var nextID int64 = 15
+	var sendCount, deleteCount int
+
 	ok := func(w http.ResponseWriter, value any) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": value})
 	}
-	msg := func() map[string]any {
-		return map[string]any{"message_id": 15, "caption": backupCaption,
-			"document": map[string]any{"file_id": fileID, "file_size": len(document), "file_name": backupFilename}}
+	result := func(d *document) map[string]any {
+		return map[string]any{
+			"message_id": d.id, "caption": d.caption,
+			"document": map[string]any{
+				"file_id": d.fileID, "file_size": len(d.bytes), "file_name": backupFilename,
+			},
+		}
 	}
+	findByID := func(id int64) *document {
+		for _, d := range docs {
+			if d.id == id { return d }
+		}
+		return nil
+	}
+	mux := http.NewServeMux()
 	mux.HandleFunc("/botfake/getChat", func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock(); defer mu.Unlock()
-		if !pinned { ok(w, map[string]any{}) } else { ok(w, map[string]any{"pinned_message": msg()}) }
+		if d := findByID(pinnedID); d != nil {
+			ok(w, map[string]any{"pinned_message": result(d)})
+		} else {
+			ok(w, map[string]any{})
+		}
 	})
 	mux.HandleFunc("/botfake/sendDocument", func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock(); defer mu.Unlock()
-		_ = r.ParseMultipartForm(MaxEncryptedSize + 1024)
-		file, _, err := r.FormFile("document"); if err != nil { t.Error(err); return }
+		if err := r.ParseMultipartForm(MaxEncryptedSize + 1024); err != nil { t.Error(err); return }
+		file, _, err := r.FormFile("document")
+		if err != nil { t.Error(err); return }
 		defer file.Close()
-		document, err = io.ReadAll(file); if err != nil { t.Error(err); return }
+		body, err := io.ReadAll(file)
+		if err != nil { t.Error(err); return }
+		nextID++
+		id := "doc-" + strconv.FormatInt(nextID, 10)
+		d := &document{id: nextID, fileID: id, caption: r.FormValue("caption"), bytes: body}
+		docs[id] = d
 		sendCount++
-		ok(w, msg())
-	})
-	mux.HandleFunc("/botfake/editMessageMedia", func(w http.ResponseWriter, r *http.Request) {
-		mu.Lock(); defer mu.Unlock()
-		_ = r.ParseMultipartForm(MaxEncryptedSize + 1024)
-		if !strings.Contains(r.FormValue("media"), backupCaption) { t.Error("backup caption missing") }
-		file, _, err := r.FormFile("document"); if err != nil { t.Error(err); return }
-		defer file.Close()
-		document, err = io.ReadAll(file); if err != nil { t.Error(err); return }
-		editCount++
-		ok(w, msg())
+		ok(w, result(d))
 	})
 	mux.HandleFunc("/botfake/pinChatMessage", func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock(); defer mu.Unlock()
-		pinned = true
+		var request struct{ MessageID int64 `json:"message_id"` }
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil { t.Error(err); return }
+		if findByID(request.MessageID) == nil { t.Error("pinning missing document"); return }
+		pinnedID = request.MessageID
 		ok(w, true)
 	})
 	mux.HandleFunc("/botfake/getFile", func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock(); defer mu.Unlock()
-		ok(w, map[string]any{"file_path": "documents/session.enc", "file_size": len(document)})
+		var request struct{ FileID string `json:"file_id"` }
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil { t.Error(err); return }
+		d := docs[request.FileID]
+		if d == nil { http.Error(w, "missing file", http.StatusNotFound); return }
+		ok(w, map[string]any{"file_path": "documents/" + d.fileID + ".enc", "file_size": len(d.bytes)})
 	})
-	mux.HandleFunc("/file/botfake/documents/session.enc", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/botfake/deleteMessage", func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock(); defer mu.Unlock()
-		w.Write(document)
+		var request struct{ MessageID int64 `json:"message_id"` }
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil { t.Error(err); return }
+		for id, d := range docs {
+			if d.id == request.MessageID {
+				delete(docs, id)
+				deleteCount++
+				break
+			}
+		}
+		ok(w, true)
+	})
+	mux.HandleFunc("/file/botfake/documents/", func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock(); defer mu.Unlock()
+		id := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/file/botfake/documents/"), ".enc")
+		if d := docs[id]; d != nil {
+			_, _ = w.Write(d.bytes)
+			return
+		}
+		http.NotFound(w, r)
 	})
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
+
 	store, err := NewTelegramStore("fake", 8256480955)
 	if err != nil { t.Fatal(err) }
 	store.apiRoot = srv.URL + "/bot"
 	store.fileRoot = srv.URL + "/file/bot"
 	store.client = srv.Client()
-
 	ctx := context.Background()
-	if _, err := store.Download(ctx); err != ErrNoBackup {
+	if _, err := store.Download(ctx); !errorsIs(err, ErrNoBackup) {
 		t.Fatalf("expected no backup, got %v", err)
 	}
-	first, err := Seal(randomKey(t), exampleFiles()); if err != nil { t.Fatal(err) }
+	key := randomKey(t)
+	first, err := Seal(key, exampleFiles())
+	if err != nil { t.Fatal(err) }
 	if err := store.Upload(ctx, first); err != nil { t.Fatal(err) }
-	downloaded, err := store.Download(ctx)
-	if err != nil || !bytes.Equal(downloaded, first) {
-		t.Fatalf("backup mismatch: %v", err)
+	if got, err := store.Download(ctx); err != nil || !bytes.Equal(first, got) {
+		t.Fatalf("first backup mismatch: %v", err)
 	}
-	next, err := Seal(randomKey(t), exampleFiles()); if err != nil { t.Fatal(err) }
-	if err := store.Upload(ctx, next); err != nil { t.Fatal(err) }
-	if sendCount != 1 || editCount != 1 {
-		t.Fatalf("send count = %d, edit count = %d", sendCount, editCount)
+	second, err := Seal(key, exampleFiles())
+	if err != nil { t.Fatal(err) }
+	if err := store.Upload(ctx, second); err != nil { t.Fatal(err) }
+	candidates, err := store.DownloadCandidates(ctx)
+	if err != nil || len(candidates) != 2 ||
+		!bytes.Equal(candidates[0], second) || !bytes.Equal(candidates[1], first) {
+		t.Fatalf("latest and previous backups were not retained: %v", err)
 	}
-	downloaded, err = store.Download(ctx)
-	if err != nil || !bytes.Equal(downloaded, next) {
-		t.Fatalf("updated backup mismatch: %v", err)
+	third, err := Seal(key, exampleFiles())
+	if err != nil { t.Fatal(err) }
+	if err := store.Upload(ctx, third); err != nil { t.Fatal(err) }
+	candidates, err = store.DownloadCandidates(ctx)
+	if err != nil || len(candidates) != 2 ||
+		!bytes.Equal(candidates[0], third) || !bytes.Equal(candidates[1], second) {
+		t.Fatalf("backup rotation invalid: %v", err)
+	}
+	if sendCount != 3 || deleteCount != 1 {
+		t.Fatalf("expected three uploads and one old cleanup, sends=%d cleanup=%d", sendCount, deleteCount)
+	}
+	// Simulate corruption of the latest stored blob. The previous copy
+	// must still decrypt with the original key.
+	mu.Lock()
+	if newest := findByID(pinnedID); newest != nil { newest.bytes = []byte("corrupt") }
+	mu.Unlock()
+	candidates, err = store.DownloadCandidates(ctx)
+	if err != nil || len(candidates) != 2 {
+		t.Fatalf("missing rollback candidate: %v", err)
+	}
+	if _, err := Open(key, candidates[0]); err == nil {
+		t.Fatal("corrupt newest backup passed authentication")
+	}
+	if _, err := Open(key, candidates[1]); err != nil {
+		t.Fatalf("the previous backup must remain decryptable: %v", err)
 	}
 }
+
+func errorsIs(got, want error) bool { return got == want }
 
 func TestTelegramHTTPFailureDoesNotLeakToken(t *testing.T) {
 	store, err := NewTelegramStore("SECRET_TOKEN", 1)
