@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"html"
+	"os"
+	"io"
 	"time"
 
 	"watgbridge/database"
@@ -101,6 +103,52 @@ func (bc *bridgeContext) downloadMedia(message whatsmeow.DownloadableMessage, de
 		return nil,nil,errors.New("mídia ultrapassou o limite seguro de memória")
 	}
 	return data,release,nil
+}
+
+// downloadMediaToTemp streams directly from authenticated WhatsApp media
+// storage into an ephemeral file. The media never exists as a full []byte in
+// the process, so Telegram can upload it with minimal additional RAM.
+// The caller MUST defer the returned cleanup function until the Telegram
+// upload finishes. The file is deleted immediately afterwards.
+func (bc *bridgeContext) downloadMediaToTemp(message whatsmeow.DownloadableMessage, declaredBytes uint64) (*os.File, func(), error) {
+	const maxTempFile = int64(600 * 1024 * 1024)
+	if declaredBytes == 0 || declaredBytes > uint64(maxTempFile) {
+		return nil, nil, errors.New("mídia sem tamanho conhecido ou maior que 600 MB")
+	}
+	size := int64(declaredBytes)
+	// Only one heavy media download/upload at a time on 256 MB of RAM.
+	select {
+	case mediaTransferSlot <- struct{}{}:
+	case <-time.After(2 * time.Minute):
+		return nil,nil,errors.New("fila de downloads ocupada; tente novamente")
+	}
+	releaseSpace,err:=mediaTransferBudget.Reserve(size)
+	if err!=nil { <-mediaTransferSlot; return nil,nil,err }
+
+	file,err:=os.CreateTemp("", "watg-media-*.tmp")
+	if err!=nil {releaseSpace();<-mediaTransferSlot;return nil,nil,err}
+	cleanup:=func(){
+		_ = file.Close()
+		_ = os.Remove(file.Name())
+		releaseSpace()
+		<-mediaTransferSlot
+	}
+	ctx,cancel:=context.WithTimeout(context.Background(),5*time.Minute)
+	defer cancel()
+	// DownloadToFile uses WhatsApp's authenticated, encrypted-media download.
+	// Unlike Download, it does not assemble a full media []byte in RAM.
+	if err:=bc.waClient.DownloadToFile(ctx,message,file);err!=nil {
+		cleanup();return nil,nil,err
+	}
+	info,err:=file.Stat()
+	if err!=nil {cleanup();return nil,nil,err}
+	if info.Size()<=0||info.Size()>maxTempFile||info.Size()>size+1024*1024 {
+		cleanup();return nil,nil,errors.New("arquivo excedeu o espaço reservado")
+	}
+	if _,err:=file.Seek(0,io.SeekStart);err!=nil {
+		cleanup();return nil,nil,err
+	}
+	return file,cleanup,nil
 }
 
 // addCaption appends a caption (truncated at 1020 chars if needed) to
