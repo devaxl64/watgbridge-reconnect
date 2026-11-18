@@ -617,7 +617,7 @@ func MessageFromOthersEventHandler(text string, v *events.Message, isEdited bool
 	// reason to create another forum topic or a duplicate Telegram group.
 	targetTgChatID := cfg.Telegram.TargetChatID
 	if cfg.Telegram.SeparateChats {
-		groupID, found, err := database.TelegramGroupForWhatsApp(v.Info.Chat.ToNonAD().String())
+		groupID, found, err := database.TelegramGroupForWhatsApp(CanonicalChatJID(v.Info.Chat).String())
 		if err != nil {
 			logger.Error("could not resolve dedicated Telegram chat", zap.Error(err))
 			return
