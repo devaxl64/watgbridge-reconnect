@@ -71,6 +71,10 @@ func AddTelegramHandlers() {
 			"Get all the WhatsApp groups along with their JIDs",
 		},
 		waTgBridgeCommand{
+			handlers.NewCommand("conversas", ConversationsCommandHandler),
+			"Ver conversas do WhatsApp identificadas pela sincronização",
+		},
+		waTgBridgeCommand{
 			handlers.NewCommand("findcontact", FindContactHandler),
 			"Fuzzy find contact JIDs from names in WhatsApp",
 		},
