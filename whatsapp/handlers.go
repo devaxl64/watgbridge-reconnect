@@ -836,11 +836,12 @@ func (bc *bridgeContext) handleImageMessage(v *events.Message) {
 		return
 	}
 
-	imageBytes, err := bc.waClient.Download(context.Background(), imageMsg)
+	imageBytes, releaseMedia, err := bc.downloadMedia(imageMsg, uint64(imageMsg.GetFileLength()))
 	if err != nil {
 		bc.sendFallbackText("\n<i>Couldn't download the photo due to some errors</i>")
 		return
 	}
+	defer releaseMedia()
 
 	addCaption(&bc.bridgedText, imageMsg.GetCaption())
 
@@ -883,11 +884,12 @@ func (bc *bridgeContext) handleGifMessage(v *events.Message) {
 		return
 	}
 
-	gifBytes, err := bc.waClient.Download(context.Background(), gifMsg)
+	gifBytes, releaseMedia, err := bc.downloadMedia(gifMsg, uint64(gifMsg.GetFileLength()))
 	if err != nil {
 		bc.sendFallbackText("\n<i>Couldn't download the GIF due to some errors</i>")
 		return
 	}
+	defer releaseMedia()
 
 	addCaption(&bc.bridgedText, gifMsg.GetCaption())
 
@@ -924,11 +926,12 @@ func (bc *bridgeContext) handleVideoMessage(v *events.Message) {
 		return
 	}
 
-	videoBytes, err := bc.waClient.Download(context.Background(), videoMsg)
+	videoBytes, releaseMedia, err := bc.downloadMedia(videoMsg, uint64(videoMsg.GetFileLength()))
 	if err != nil {
 		bc.sendFallbackText("\n<i>Couldn't download the video due to some errors</i>")
 		return
 	}
+	defer releaseMedia()
 
 	addCaption(&bc.bridgedText, videoMsg.GetCaption())
 
@@ -972,11 +975,12 @@ func (bc *bridgeContext) handleVoiceNoteMessage(v *events.Message) {
 		return
 	}
 
-	audioBytes, err := bc.waClient.Download(context.Background(), audioMsg)
+	audioBytes, releaseMedia, err := bc.downloadMedia(audioMsg, uint64(audioMsg.GetFileLength()))
 	if err != nil {
 		bc.sendFallbackText("\n<i>Couldn't download the audio due to some errors</i>")
 		return
 	}
+	defer releaseMedia()
 
 	sentMsg, _ := bc.tgBot.SendAudio(bc.tgChatID,
 		&gotgbot.FileReader{Name: "audio.ogg", Data: bytes.NewReader(audioBytes)},
@@ -1004,11 +1008,12 @@ func (bc *bridgeContext) handleAudioMessage(v *events.Message) {
 		return
 	}
 
-	audioBytes, err := bc.waClient.Download(context.Background(), audioMsg)
+	audioBytes, releaseMedia, err := bc.downloadMedia(audioMsg, uint64(audioMsg.GetFileLength()))
 	if err != nil {
 		bc.sendFallbackText("\n<i>Couldn't download the audio due to some errors</i>")
 		return
 	}
+	defer releaseMedia()
 
 	sentMsg, _ := bc.tgBot.SendAudio(bc.tgChatID,
 		&gotgbot.FileReader{Name: "audio.m4a", Data: bytes.NewReader(audioBytes)},
@@ -1036,11 +1041,12 @@ func (bc *bridgeContext) handleDocumentMessage(v *events.Message) {
 		return
 	}
 
-	documentBytes, err := bc.waClient.Download(context.Background(), documentMsg)
+	documentBytes, releaseMedia, err := bc.downloadMedia(documentMsg, uint64(documentMsg.GetFileLength()))
 	if err != nil {
 		bc.sendFallbackText("\n<i>Couldn't download the document due to some errors</i>")
 		return
 	}
+	defer releaseMedia()
 
 	addCaption(&bc.bridgedText, documentMsg.GetCaption())
 
@@ -1069,11 +1075,12 @@ func (bc *bridgeContext) handleStickerMessage(v *events.Message) {
 		return
 	}
 
-	stickerBytes, err := bc.waClient.Download(context.Background(), stickerMsg)
+	stickerBytes, releaseMedia, err := bc.downloadMedia(stickerMsg, uint64(stickerMsg.GetFileLength()))
 	if err != nil {
 		bc.sendFallbackText("\n<i>Couldn't download the sticker due to some errors</i>")
 		return
 	}
+	defer releaseMedia()
 
 	// Send as file if configured
 	if bc.cfg.Telegram.SendStickersAsFile {
