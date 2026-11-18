@@ -31,6 +31,8 @@ Dependência: PR #1 `feature/separate-chats` validada.
 
 ## Tópicos antigos e segurança da migração
 - [ ] Identificar tópicos antigos no supergrupo original e evitar criar novos tópicos para conversas que agora usam grupos separados.
+- [ ] Remover dependências de `TARGET_CHAT_ID` no grupo legado: chamadas, atualizações de grupo, imagem, menções e Status ainda recorrem a esse ID; redirecionar para destinos atuais antes de o proprietário excluir o grupo antigo.
+- [ ] Confirmar teste de desligamento/exclusão do grupo legado sem perda de mensagens, backups ou eventos, antes de recomendar `Delete and Leave`.
 - [ ] Preservar o histórico dos tópicos antigos; não excluir grupos, sair deles nem apagar histórico automaticamente.
 - [ ] Quando possível, recuperar apenas a associação entre WhatsApp e grupo dedicado, sem duplicar conversas ou misturar contatos.
 - [ ] Se houver necessidade de copiar histórico, definir procedimento opt-in separado, após validar permissões e limites do Telegram.
