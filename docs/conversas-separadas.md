@@ -144,6 +144,30 @@
 
 **Estado:** estas ações foram especificadas, **não implementadas nem validadas em produção**. Não mudar o Northflank atual até testes.
 
+## Implementação realizada nesta branch — sessão sem notebook
+
+- [x] Backup criptografado AES-256-GCM dos bancos SQLite `wawebstore.db` (sessão WhatsApp) e `gobot.sqlite.db` (vínculos e mensagens do bridge).
+- [x] Snapshot consistente usando SQLite `VACUUM INTO` e criptografia ANTES de enviar ao Telegram.
+- [x] Recuperação automática **antes** de abrir os bancos quando arquivos locais desaparecerem.
+- [x] Backup enviado para a **conversa privada do bot com o proprietário** como documento fixado; backups subsequentes tentam editar a mensagem existente. Nenhum segredo é gravado no GitHub.
+- [x] Backup periódico somente quando WhatsApp estiver autenticado, para evitar substituir sessão válida por banco vazio.
+- [x] Se não houver sessão, bot permanece ativo para comandos sem gerar um fluxo infinito de QR Codes.
+- [x] `/codigo 55DDDNÚMERO` gera código WhatsApp para vinculação de um único celular, exclusivamente em DM do proprietário.
+- [x] `/status` e `/reconectar` sem apagar a sessão existente.
+- [x] Testes unitários de criptografia, adulteração, recuperação, SQLite e Telegram simulado (execução final deve ser confirmada pelo CI).
+
+### Ativação posterior, somente após CI e revisão
+
+1. A versão modificada ainda **não está implantada** no Northflank; a imagem original permanece funcionando.
+2. Gerar chave aleatória de 32 bytes: `openssl rand -base64 32` (somente no dispositivo do usuário, jamais no GitHub).
+3. No serviço Northflank, configurar uma variável **secret** `WATG_BACKUP_KEY` com o valor, e **não** adicionar a chave à configuração versionada ou ao Telegram.
+4. Uma vez publicada a versão validada do fork, a sessão WhatsApp já vinculada **precisa ser migrada** ou pareada novamente por `/codigo`; o novo backup só é criado depois de a sessão estar autenticada.
+5. O bot usa a conversa privada existente com seu proprietário (não precisa criar um grupo novo). **Não remover/desafixar manualmente o documento de backup**, pois o bot precisa encontrá-lo via mensagem fixada.
+6. Telegram Bot API `getFile` tem limite de 20 MB, portanto o backup criptografado fica limitado a **18 MiB**; bancos maiores precisam de estratégia alternativa. Não prometer restauração até validar backup real no ambiente.
+7. Um backup falho ou sessão explicitamente revogada pelo WhatsApp **pode exigir novo pareamento**. No primeiro ciclo, confirmar recebimento da mensagem `WATGBRIDGE_SESSION_BACKUP_V1` na conversa privada com `@Wpp_TBot` e status da sincronização.
+8. **NÃO publicar a branch de trabalho** sem aprovação dos testes de compilação e sem planejar a migração do serviço existente.
+
+
 ## Andamento
 
 - [x] Fork de trabalho criado.
