@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
-	"strings"
 	"time"
 
 	"watgbridge/groupclient"
@@ -36,8 +35,8 @@ func TelegramUserStatusHandler(bot *gotgbot.Bot,ctx *ext.Context)error{
 	return err
 }
 
-// TelegramUserLoginHandler starts a one-time user login. Login codes must
-// never appear in logs, config files, GitHub or public groups.
+// TelegramUserLoginHandler starts an official QR-based MTProto login.
+// Numeric sign-in codes are never sent to the bot or to a chat.
 func TelegramUserLoginHandler(bot *gotgbot.Bot,ctx *ext.Context)error{
 	if !isPrivateOwner(ctx){return nil}
 	manager:=groupclient.Active()
@@ -54,34 +53,19 @@ func TelegramUserLoginHandler(bot *gotgbot.Bot,ctx *ext.Context)error{
 		return utils.TgReplyWithErrorByContext(bot,ctx,"Login já solicitado",err)
 	}
 	_,err:=utils.TgReplyTextByContext(bot,ctx,
-		"Login solicitado. Aguarde a mensagem do código e use /tgcodigo 12345 no privado.",nil,false)
+		"Login por QR solicitado. Abra o Telegram no computador e escaneie o QR com o celular: Configurações -> Dispositivos -> Conectar dispositivo.",nil,false)
 	return err
 }
 
-// TelegramUserCodeHandler deletes the plaintext login code immediately
-// from chat history and submits it only to the currently waiting login flow.
-func TelegramUserCodeHandler(bot *gotgbot.Bot,ctx *ext.Context)error{
-	if !isPrivateOwner(ctx){return nil}
-	if ctx.EffectiveMessage!=nil {
-		_,_ = bot.DeleteMessage(ctx.EffectiveChat.Id,ctx.EffectiveMessage.MessageId,nil)
+// TelegramUserCodeHandler is kept solely to delete old /tgcodigo messages.
+// Telegram invalidates numeric login codes when sent to ANY chat.
+func TelegramUserCodeHandler(bot *gotgbot.Bot, ctx *ext.Context) error {
+	if !isPrivateOwner(ctx) { return nil }
+	if ctx.EffectiveMessage != nil {
+		_, _ = bot.DeleteMessage(ctx.EffectiveChat.Id, ctx.EffectiveMessage.MessageId, nil)
 	}
-	manager:=groupclient.Active()
-	if manager==nil {
-		_,err:=bot.SendMessage(state.State.Config.Telegram.OwnerID,
-			"Conta Telegram não configurada. Use /tgstatus.",nil)
-		return err
-	}
-	args:=ctx.Args()
-	if len(args)!=2 {
-		_,err:=bot.SendMessage(state.State.Config.Telegram.OwnerID,
-			"Formato: /tgcodigo 12345. A mensagem é apagada depois de lida.",nil)
-		return err
-	}
-	if err:=manager.SubmitCode(strings.TrimSpace(args[1]));err!=nil {
-		return utils.TgReplyWithErrorByContext(bot,ctx,"Código não solicitado",err)
-	}
-	_,err:=bot.SendMessage(state.State.Config.Telegram.OwnerID,
-		"Código enviado para autenticação. Aguarde a confirmação.",nil)
+	_, err := bot.SendMessage(state.State.Config.Telegram.OwnerID,
+		"/tgcodigo foi desativado. O Telegram invalida códigos enviados por mensagem. Use /tglogin e escaneie o QR Code pelo celular.", nil)
 	return err
 }
 
