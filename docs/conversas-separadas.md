@@ -80,12 +80,51 @@
 - Depois que a mídia chegar aos **servidores do Telegram**, respeitar download automático/cache do **aplicativo Telegram** do usuário. Não guardar cópias completas nem histórico de conteúdo no Northflank.
 - Mensagens sem mídia devem ir direto sem ocupar a cota de downloads pesados. Ao usar serviço indisponível, não baixar de novo desnecessariamente nem gerar duplicatas ao fazer retry.
 
+## Compromissos adicionais — 17/11/2026 (não esquecer)
+
+### Integração com Northflank
+
+- Conectar a instalação GitHub da equipe `axl64's team` ao fork `devaxl64/watgbridge-reconnect`, restringindo o acesso ao repositório específico quando possível.
+- **Não mudar ainda** o serviço de produção `Default / whatsapp-telegram`: ele usa `ghcr.io/akshettrj/watgbridge:latest`. Vincular o GitHub à conta Northflank **não altera automaticamente a imagem do serviço existente**.
+- Quando a nova versão estiver validada, preparar build da branch apropriada e migração controlada sem criar custos adicionais; conferir forma de desativar deploy automático durante testes e preservar variáveis/secret files.
+- Versão de trabalho atual: branch `feature/separate-chats`, pull request de rascunho #1. Não mesclar nem implantar código ainda incompleto.
+
+### Operações de mensagens exigidas
+
+- Mensagens em duas vias: **enviar e receber textos**, fotos, vídeos, documentos, áudios e figurinhas, com respostas citadas.
+- **Editar mensagens** enviadas do Telegram e refletir a edição no WhatsApp **quando o protocolo e janela de edição permitirem**; refletir alterações feitas no WhatsApp em suas cópias do Telegram. Evitar criar nova mensagem quando é possível editar a existente.
+- **Apagar mensagens**: diferenciar *apagar para mim* e *apagar para todos*. Propagar exclusão/revogação quando autorizada, suportada e dentro do prazo; nunca prometer exclusão universal fora das regras das plataformas.
+- Preservar vínculo mensagem WhatsApp ↔ mensagem Telegram somente enquanto necessário para editar, apagar, responder, evitar duplicações e consultar estado; preferir metadados enxutos e/ou registro privado no Telegram, em vez de armazenar conteúdo e anexos no Northflank.
+- Em grupos, exibir nome/número da pessoa que escreveu; garantir associação estável entre contatos em grupos distintos. Não acrescentar emoji aos nomes. Verificar foto de perfil sempre que entrar mensagem, em privado ou grupo.
+
+### Significado dos 600 MB
+
+- Os **600 MB são orçamento total de espaço temporário disponível no Northflank** para transferências em andamento, **NÃO um tamanho obrigatório dos arquivos enviados pelo bot** e NÃO uma meta de enviar arquivos de 600 MB. Arquivos pequenos também são transmitidos normalmente.
+- A política deve contabilizar todos os temporários ativos, não baixar mídia acima do limite individual e não ocupar a faixa de 300 MB reservada a dados de trabalho, deixando ~100 MB de folga nominal. Antes de gravar, conferir espaço real, pois parte do disco pode estar ocupada pela imagem ou outros arquivos. O código de reserva é preliminar e ainda **não está acoplado à transferência real**.
+- **Modo padrão preferido:** WhatsApp (servidor) -> ponte (dados temporários) -> **servidor Telegram**. Depois do upload completo, apagar temporário imediatamente. A mensagem/mídia continuará no Telegram, mesmo se o Northflank reiniciar; o usuário pode **baixar no celular mais tarde** conforme o Telegram. Enviar à nuvem do Telegram **não significa baixar para o celular**.
+- **O botão nativo de baixar do Telegram não pode iniciar, por si só, download do WhatsApp**. Para usar mídia só no WhatsApp inicialmente e transmitir depois, a ponte teria que mandar prévia/aviso mais um **botão/comando próprio “Baixar mídia”** que requisita o arquivo e faz upload naquele momento, se a mídia ainda estiver disponível no WhatsApp; isso **não é equivalente** ao botão nativo de download. Escolher a estratégia conforme requisitos/limites técnicos, sem prometer acesso direto privado de Telegram aos servidores WhatsApp.
+- Foto e vídeo devem aparecer preferencialmente com prévia nativa, se upload/limite/formato permitirem; documentos com nome e miniatura quando suportado. O Telegram decide download e cache no aparelho.
+- Se o envio falhar por tamanho/limites, avisar claramente, sem ocupar 600 MB indefinidamente. Respeitar a limitação de 50 MB na Bot API normal; não pressupor que o bot possa transmitir vídeo de 600 MB sem rota especial. Usar envio MTProto quando apropriado e após teste.
+- Cópias de fotos de perfil devem ficar no Telegram; no Northflank só imagem miniaturizada e temporária ao comparar e atualizar. Ao abrir fotografia de perfil, depender da mídia armazenada pelo Telegram ou de solicitação sob demanda se disponível.
+
+### Continuidade e prioridade atual
+
+1. **PRIORIDADE ABSOLUTA AGORA:** reconstruir e persistir os vínculos com os mesmos grupos Telegram após reinicialização; jamais criar duplicatas por mero sumiço da tabela local.
+2. Depois: autenticação/sessão e reconexão controlada, com no máximo um aviso por desconexão e QR apenas sob comando.
+3. Depois: criação automática de grupos individuais e encaminhamento bidirecional com edição/exclusão/respostas.
+4. Depois: identidade visual, avatares, nomes/números estáveis e melhorias de mídia.
+5. Depois: integração segura no Northflank de produção e testes de RAM/armazenamento.
+6. **Não depender da memória do usuário para relembrar estas decisões**: este documento é a fonte de requisitos do fork.
+
+**Atenção sobre persistência:** apenas 1 GB de disco efêmero no Northflank não garante sobreviver à substituição do contêiner. Para garantir a recuperação sem um serviço pago adicional, precisamos de registro/backup seguro e durável no próprio Telegram, ou aceitar novo QR quando perder a sessão. A política “a chave nova substitui a antiga” não pode apagar a última cópia válida antes de confirmar a nova.
+
+
 ## Andamento
 
 - [x] Fork de trabalho criado.
 - [x] Branch `feature/separate-chats` criada.
 - [x] Modelo de vínculo WhatsApp -> grupo Telegram e funções de consulta (etapa preliminar).
-- [x] Testes automatizados do vínculo adicionados (ainda sem confirmação de execução bem-sucedida).
+- [x] Testes automatizados do vínculo adicionados (GitHub Actions confirmou execução bem-sucedida em 17/11/2026).
 - [x] Especificação visual e de mídia revisada.
 - [ ] Definir e implementar recuperação **durável** de vínculo sem duplicação.
 - [ ] Criar grupos automaticamente via MTProto, mantendo identidade visual.
