@@ -217,3 +217,12 @@ go test ./database
 ```
 
 A versão personalizada **ainda não está pronta para implantação**. O branch está isolado de `main`.
+
+## Decisão consolidada: recuperação de todas as conversas (18/11/2026)
+
+- Recuperar **todas as conversas disponíveis** via metadados WhatsApp, não apenas as 20 exibidas por página em `/conversas lista`.
+- `/conversas lista 2`, `/conversas lista 3` etc. permitem consultar todas as páginas, sem um teto total de 20; a paginação evita extrapolar o tamanho máximo da mensagem Telegram.
+- O provisionamento consulta o catálogo completo (sem o antigo corte de 5.000 nessa consulta) e recupera vínculos duráveis antes de criar grupos novos.
+- Em modo `telegram.separate_chats`, criar grupos novos gradualmente com padrão de **1 por ciclo de 5 minutos**, até contemplar todas as conversas elegíveis; permitir `WATG_AUTOCREATE_BATCH=0` para desabilitar e valores de 1 a 5 para ajustar o lote, respeitando limites do Telegram e evitando duplicações.
+- Não prometer recuperação de conversas cujos metadados não foram disponibilizados pelo WhatsApp, nem restaurar mensagens antigas só para gerar a lista. Identificadores LID sem mapeamento confiável exigem tratamento seguro antes da criação.
+- **Não alterar Northflank, nem fazer merge, até a versão de desenvolvimento passar por testes e receber autorização de implantação.**
