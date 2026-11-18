@@ -7,6 +7,7 @@ import (
 	"html"
 	"os"
 	"io"
+	"strings"
 	"syscall"
 	"time"
 
@@ -135,7 +136,7 @@ const maxMediaInRAM int64 = 8 * 1024 * 1024
 func (bc *bridgeContext) downloadMedia(message whatsmeow.DownloadableMessage, declaredBytes uint64) ([]byte, func(), error) {
 	size := int64(declaredBytes)
 	if size <= 0 || size > maxMediaInRAM {
-		return nil,nil,errors.New("mídia acima de 48 MB ou sem tamanho informado; envio seguro indisponível")
+		return nil,nil,errors.New("figurinha acima de 8 MiB ou sem tamanho informado; envio seguro indisponível")
 	}
 	select {
 	case mediaTransferSlot <- struct{}{}:
@@ -220,6 +221,22 @@ func (bc *bridgeContext) downloadMediaToTemp(message whatsmeow.DownloadableMessa
 		cleanup();return nil,nil,err
 	}
 	return file,cleanup,nil
+}
+
+// videoFileName handles absent or malformed WhatsApp MIME types safely.
+// A corrupted or unexpected MIME label must never crash the entire bridge.
+func videoFileName(contentType string) string {
+	mediaType := strings.ToLower(strings.TrimSpace(strings.SplitN(contentType, ";", 2)[0]))
+	switch mediaType {
+	case "video/webm":
+		return "video.webm"
+	case "video/3gpp":
+		return "video.3gp"
+	case "video/quicktime":
+		return "video.mov"
+	default:
+		return "video.mp4"
+	}
 }
 
 // addCaption appends a caption (truncated at 1020 chars if needed) to
