@@ -8,6 +8,11 @@ on:
     branches: [ "main", "master" ]
   workflow_dispatch:
 
+# Avoid wasting free GitHub minutes building superseded PR revisions.
+concurrency:
+  group: docker-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
@@ -65,4 +70,4 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           platforms: linux/amd64,linux/arm64
-          no-cache: true
+          no-cache: false
