@@ -77,6 +77,10 @@ func WhatsAppEventHandler(evt interface{}) {
 
 	case *events.Message:
 		CaptureIncomingChat(v)
+		QueueProfileRefresh(v.Info.Chat)
+		if v.Info.IsGroup && !v.Info.MessageSource.Sender.IsEmpty() {
+			QueueProfileRefresh(v.Info.MessageSource.Sender)
+		}
 		handleMessageEvent(cfg, v)
 	}
 }
@@ -1592,6 +1596,9 @@ func PushNameEventHandler(v *events.PushName) {
 }
 
 func UserAboutEventHandler(v *events.UserAbout) {
+	if state.State.Config.Telegram.SeparateChats {
+		return // no old forum topics in dedicated-group mode
+	}
 	var (
 		cfg      = state.State.Config
 		logger   = state.State.Logger
@@ -1681,7 +1688,7 @@ func RevokedMessageEventHandler(v *events.Message) {
 	}
 
 	tgChatId, tgThreadId, tgMsgId, err := database.MsgIdGetTgFromWa(waMsgId, waChatId)
-	if err != nil || tgChatId == 0 || tgThreadId == 0 || tgMsgId == 0 {
+	if err != nil || tgChatId == 0 || tgMsgId == 0 {
 		return
 	}
 
@@ -1698,6 +1705,21 @@ func RevokedMessageEventHandler(v *events.Message) {
 // ============================================================
 
 func PictureEventHandler(v *events.Picture) {
+	if state.State.Config.Telegram.SeparateChats {
+		// Profile photos become Telegram group avatars instead of noisy
+		// chat messages announcing every avatar update.
+		if v.Remove {
+			telegramID, linked, err := database.TelegramGroupForWhatsApp(v.JID.ToNonAD().String())
+			if err == nil && linked && state.State.TelegramBot != nil {
+				if removed, err := state.State.TelegramBot.DeleteChatPhoto(telegramID, nil); err == nil && removed {
+					_ = database.SetKnownAvatarVersion(v.JID.ToNonAD().String(), "")
+				}
+			}
+			return
+		}
+		QueueProfileRefresh(v.JID)
+		return
+	}
 	var (
 		cfg    = state.State.Config
 		logger = state.State.Logger
@@ -1808,6 +1830,9 @@ func sendUpdatedPicture(client *whatsmeow.Client, tgBot *gotgbot.Bot, cfg *state
 // ============================================================
 
 func GroupInfoEventHandler(v *events.GroupInfo) {
+	if state.State.Config.Telegram.SeparateChats {
+		return // group metadata will be updated directly, not via forum topics
+	}
 	var (
 		cfg      = state.State.Config
 		logger   = state.State.Logger
