@@ -199,9 +199,8 @@ func scanTelegramBridgeGroups(ctx context.Context,api *tg.Client)(map[string]*tg
 		for _,c:=range chats {
 			ch,ok:=c.(*tg.Channel)
 			if !ok||!ch.Megagroup||ch.AccessHash==0 {continue}
-			full,err:=api.ChannelsGetFullChannel(ctx,&tg.ChannelsGetFullChannelRequest{
-				Channel:&tg.InputChannel{ChannelID:ch.ID,AccessHash:ch.AccessHash},
-			})
+			full,err:=api.ChannelsGetFullChannel(ctx,
+				&tg.InputChannel{ChannelID:ch.ID,AccessHash:ch.AccessHash})
 			if err!=nil {return nil,fmt.Errorf("could not inspect Telegram group %d; no groups created: %w",ch.ID,err)}
 			info,ok:=full.FullChat.(*tg.ChannelFull)
 			if !ok {continue}
