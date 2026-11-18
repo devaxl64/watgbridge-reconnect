@@ -3,6 +3,7 @@ package sessionbackup
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -43,6 +44,7 @@ func Paths(waDriver, waURL, bridgeDriver, bridgePath string) (map[string]string,
 	return map[string]string{
 		"wawebstore.db": waPath,
 		"gobot.sqlite.db": bridgePath,
+		optionalSession: getTelegramSessionPath(),
 	}, nil
 }
 
@@ -94,5 +96,20 @@ func SnapshotBoth(ctx context.Context, paths map[string]string) (map[string][]by
 		}
 		files[name] = data
 	}
+	// Store a consistent MTProto JSON session when already authenticated.
+	// Missing optional login is expected during first pairing.
+	sessionPath := paths[optionalSession]
+	if sessionPath != "" {
+		if data, err := os.ReadFile(sessionPath); err == nil &&
+			len(data) > 0 && len(data) < 1024*1024 && json.Valid(data) {
+			files[optionalSession] = data
+		}
+	}
 	return files, nil
+}
+
+func getTelegramSessionPath() string {
+	path := os.Getenv("WATG_TG_SESSION_FILE")
+	if path == "" { path = "telegram-user.json" }
+	return path
 }
