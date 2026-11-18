@@ -91,7 +91,7 @@ func AddTelegramHandlers() {
 		},
 		waTgBridgeCommand{
 			handlers.NewCommand("tgcodigo", TelegramUserCodeHandler),
-			"Informar código de vinculação do Telegram no privado",
+			"Desativado: autentique pelo QR com /tglogin",
 		},
 		waTgBridgeCommand{
 			handlers.NewCommand("criarchats", SyncDedicatedGroupsHandler),
