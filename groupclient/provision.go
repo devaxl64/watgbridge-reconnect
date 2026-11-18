@@ -11,6 +11,9 @@ import (
 
 	"watgbridge/database"
 	"watgbridge/routeidentity"
+	"watgbridge/state"
+
+	waTypes "go.mau.fi/whatsmeow/types"
 
 	"github.com/gotd/td/tg"
 )
@@ -116,19 +119,65 @@ func (m *Manager) Sync(ctx context.Context, maxNew int, botUsername string) (Rep
 	return report,err
 }
 
-func chatTitle(chat database.KnownChat)string{
-	name:=strings.TrimSpace(chat.Name)
-	num:=chat.WaChatID
-	if at:=strings.IndexByte(num,'@');at>=0 {num=num[:at]}
-	if chat.Kind=="private"{
-		if strings.HasPrefix(num,"55")&&len(num)>11 {num=num[2:]}
-		if name==""{name=num}else if num!="" && !strings.EqualFold(name,num){
-			name+=" ("+num+")"
+// contactDisplayName checks the real WhatsApp contact store and its cached
+// contacts. The chat ID is a routing key, never a name; LID IDs are not phones.
+func contactDisplayName(chat database.KnownChat) string {
+	if chat.Kind != "private" { return "" }
+	jid, err := waTypes.ParseJID(chat.WaChatID)
+	if err != nil || jid.Server != waTypes.DefaultUserServer || jid.User == "" {
+		return ""
+	}
+	wa := state.State.WhatsAppClient
+	if wa != nil && wa.Store != nil && wa.Store.Contacts != nil {
+		lookupCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		contact, getErr := wa.Store.Contacts.GetContact(lookupCtx, jid)
+		cancel()
+		if getErr == nil && contact.Found {
+			for _, name := range []string{contact.FullName, contact.BusinessName, contact.FirstName, contact.PushName} {
+				name = strings.TrimSpace(name)
+				if humanContactName(name, jid.User) { return name }
+			}
 		}
-	}else if name==""{name="Grupo "+num}
-	// Supergroup titles are short; truncate by rune, not byte.
-	if utf8.RuneCountInString(name)>90 {
-		name=string([]rune(name)[:90])
+	}
+	if state.State.Database != nil {
+		first, full, push, business, found, getErr := database.ContactNameGet(jid.User, jid.Server)
+		if getErr == nil && found {
+			for _, name := range []string{full, business, first, push} {
+				name = strings.TrimSpace(name)
+				if humanContactName(name, jid.User) { return name }
+			}
+		}
+	}
+	return ""
+}
+
+func humanContactName(name, number string) bool {
+	name = strings.TrimSpace(name)
+	return name != "" && name != number && name != "+"+number &&
+		name != strings.TrimPrefix(number, "55") && name != "0"
+}
+
+// chatTitle prefers the WhatsApp address-book name. For a known phone-number
+// JID without a saved name, display it as an international phone number (+DDI)
+// rather than a bare numeric database identifier.
+func chatTitle(chat database.KnownChat) string {
+	name := strings.TrimSpace(chat.Name)
+	num := chat.WaChatID
+	if at := strings.IndexByte(num, '@'); at >= 0 { num = num[:at] }
+	if chat.Kind == "private" {
+		if !humanContactName(name, num) {
+			name = contactDisplayName(chat)
+		}
+		if name == "" {
+			name = "+" + num
+		} else {
+			name += " (+" + num + ")"
+		}
+	} else if name == "" {
+		name = "Grupo " + num
+	}
+	if utf8.RuneCountInString(name) > 90 {
+		name = string([]rune(name)[:90])
 	}
 	return name
 }
