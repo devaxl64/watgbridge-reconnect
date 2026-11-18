@@ -135,7 +135,7 @@ func AddTelegramHandlers() {
 		},
 		waTgBridgeCommand{
 			handlers.NewCommand("newqr", NewQRHandler),
-			"Log out of WhatsApp and send a new QR code to pair again",
+			"QR desativado: reconectar ou usar código numérico",
 		},
 		waTgBridgeCommand{
 			handlers.NewCommand("codigo", PairWhatsAppByPhoneCodeHandler),
@@ -1039,55 +1039,17 @@ func RestartBotHandler(b *gotgbot.Bot, c *ext.Context) error {
 // NewQRHandler removes the current WhatsApp session and restarts the bridge,
 // which then sends a fresh pairing QR code to the owner. Only the device row
 // is removed; the chat/thread mappings in the bot database are not touched.
+// NewQRHandler is intentionally a non-destructive compatibility alias.
+// WhatsApp pairing is phone-code-only: /codigo. Never delete a valid device
+// session or trigger QR pairing in response to this legacy command.
 func NewQRHandler(b *gotgbot.Bot, c *ext.Context) error {
 	if !utils.TgUpdateIsAuthorized(b, c) {
 		return nil
 	}
-	if os.Getenv("WATG_BACKUP_KEY") != "" {
-		_, err := utils.TgReplyTextByContext(b, c,
-			"O modo de recuperação segura está ativo. Não vou apagar sua sessão. "+
-				"Use /reconectar; se a sessão foi perdida, use /codigo 55DDDNÚMERO no privado.", nil, false)
-		return err
-	}
-
-	waClient := state.State.WhatsAppClient
-	if waClient == nil || waClient.Store == nil {
-		_, err := utils.TgReplyTextByContext(b, c, "WhatsApp client is not initialised", nil, false)
-		return err
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
-	defer cancel()
-
-	if waClient.Store.ID != nil {
-		// Logout also deletes the device from the store on success. It fails
-		// when WhatsApp has already dropped the session, so delete it locally.
-		if err := waClient.Logout(ctx); err != nil {
-			utils.TgReplyTextByContext(b, c,
-				"Could not log out on WhatsApp's side (the session is probably already invalid), removing it locally", nil, false)
-			if err := waClient.Store.Delete(ctx); err != nil {
-				return utils.TgReplyWithErrorByContext(b, c, "Failed to delete the local WhatsApp session", err)
-			}
-		}
-	}
-	waClient.Disconnect()
-
-	// The pairing flow always sends the QR code to the owner's private chat.
-	qrDestination := "here"
-	if c.EffectiveChat.Id != state.State.Config.Telegram.OwnerID {
-		qrDestination = "to the bot owner's private chat"
-	}
-
-	utils.TgReplyTextByContext(b, c,
-		"Session removed. Restarting now, a new QR code will be sent "+qrDestination+" in a few seconds.\n"+
-			"On your phone: WhatsApp &gt; Linked devices &gt; Link a device.", nil, false)
-
-	restartBridgeSoon(b, c, func() {
-		// The session is already gone, so only a manual restart can pair again.
-		utils.TgReplyTextByContext(b, c,
-			"The WhatsApp session was removed but the bridge could not restart. Restart it manually to get a new QR code.", nil, false)
-	})
-	return nil
+	_, err := utils.TgReplyTextByContext(b, c,
+		"Pareamento por QR Code desativado. Se a sessão existe, use /reconectar. "+
+			"Se perdeu a sessão, use /codigo 5511941233764 no privado do bot.", nil, false)
+	return err
 }
 
 func JoinInviteLinkHandler(b *gotgbot.Bot, c *ext.Context) error {
