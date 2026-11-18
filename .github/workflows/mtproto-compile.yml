@@ -35,10 +35,6 @@ jobs:
           go-version-file: go.mod
       - name: Resolve exact dependencies
         run: go mod tidy
-      - name: Test all packages
-        run: go test ./...
-      - name: Verify entire project compiles
-        run: go build ./...
       - name: Persist generated go.sum only on working feature branch
         run: |
           git config user.name "github-actions[bot]"
@@ -48,3 +44,7 @@ jobs:
             git commit -m "build: synchronize MTProto dependency checksums"
             git push origin HEAD:feature/separate-chats
           fi
+      - name: Test all packages
+        run: go test ./...
+      - name: Verify entire project compiles
+        run: go build ./...
