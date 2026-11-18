@@ -2,11 +2,16 @@ name: Docker Build and Publish
 
 on:
   push:
-    branches: [ "main", "master" ]
+    branches: [ "main", "master", "feature/separate-chats" ]
     tags: [ 'v*.*.*' ]
   pull_request:
     branches: [ "main", "master" ]
   workflow_dispatch:
+
+# Avoid wasting free GitHub minutes building superseded PR revisions.
+concurrency:
+  group: docker-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 env:
   REGISTRY: ghcr.io
@@ -64,5 +69,5 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          platforms: linux/amd64,linux/arm64
-          no-cache: true
+          platforms: ${{ (github.event_name == 'pull_request' || github.ref == 'refs/heads/feature/separate-chats') && 'linux/amd64' || 'linux/amd64,linux/arm64' }}
+          no-cache: false

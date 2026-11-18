@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -11,6 +12,8 @@ import (
 
 	"watgbridge/database"
 	"watgbridge/modules"
+	"watgbridge/groupclient"
+	"watgbridge/sessionbackup"
 	"watgbridge/state"
 	"watgbridge/telegram"
 	"watgbridge/utils"
@@ -145,9 +148,12 @@ func main() {
 	}
 
 	if cfg.GoExecutable == "" {
-		cfg.GoExecutable = findExecutablePath(logger, cfg, "go", true)
-		logger.Info("setting path to go executable", zap.String("path", cfg.GoExecutable))
-		configChanged = true
+		// The lightweight runtime Docker image intentionally contains no Go
+		// compiler; it is only needed for optional in-place source updates.
+		cfg.GoExecutable = findExecutablePath(logger, cfg, "go", false)
+		if cfg.GoExecutable != "" {
+			logger.Info("setting path to go executable", zap.String("path", cfg.GoExecutable))
+		}
 	}
 
 	if cfg.FfmpegExecutable == "" && !cfg.Telegram.SkipVideoStickers {
@@ -157,9 +163,33 @@ func main() {
 	}
 
 	if configChanged {
+		// Mounted secret files are commonly read-only in production.
+		// Discovered binary paths only need to live for this process;
+		// refuse to rewrite secret config at startup.
 		_ = logger.Sync()
-		if err = cfg.SaveConfig(); err != nil {
-			logger.Fatal("failed to save config file", zap.Error(err))
+	}
+
+	// Restore an encrypted Telegram backup BEFORE either SQLite DB is opened.
+	// This is opt-in; deployments without WATG_BACKUP_KEY behave as before.
+	backupManager, err := sessionbackup.NewManagerFromEnv(
+		cfg.Telegram.BotToken, cfg.Telegram.OwnerID,
+		cfg.WhatsApp.LoginDatabase.Type, cfg.WhatsApp.LoginDatabase.URL,
+		cfg.Database["type"], cfg.Database["path"],
+	)
+	if err != nil {
+		logger.Fatal("invalid encrypted backup configuration", zap.Error(err))
+	}
+	var backupRestoreFailed bool
+	if backupManager != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+		restored, restoreErr := backupManager.RestoreIfMissing(ctx)
+		cancel()
+		if restoreErr != nil {
+			backupRestoreFailed = true
+			logger.Error("could not restore encrypted Telegram session backup; no session will be deleted",
+				zap.Error(restoreErr))
+		} else if restored {
+			logger.Info("restored missing SQLite database files from encrypted Telegram backup")
 		}
 	}
 
@@ -186,7 +216,44 @@ func main() {
 	}
 	_ = logger.Sync()
 
-	err = whatsapp.NewWhatsAppClient()
+	// The Telegram user login must NOT send numeric codes through a bot.
+	// Telegram invalidates any code shared in a chat. Use the official QR
+	// login instead: the bot delivers a short-lived QR photo to the owner.
+	var pendingQRMessageID int64
+	userClient, err := groupclient.NewFromEnvironment(func(message string) {
+		if message == "Conta Telegram autenticada. Agora é possível recuperar e criar grupos individuais." && pendingQRMessageID != 0 {
+			_, _ = state.State.TelegramBot.DeleteMessage(cfg.Telegram.OwnerID, pendingQRMessageID, nil)
+			pendingQRMessageID = 0
+		}
+		_, _ = state.State.TelegramBot.SendMessage(
+			cfg.Telegram.OwnerID, message, &gotgbot.SendMessageOpts{})
+	})
+	if err != nil {
+		logger.Fatal("invalid Telegram user configuration", zap.Error(err))
+	}
+	groupclient.Register(userClient)
+	if userClient != nil {
+		userClient.SetQRNotifier(func(png []byte) error {
+			if pendingQRMessageID != 0 {
+				_, _ = state.State.TelegramBot.DeleteMessage(cfg.Telegram.OwnerID, pendingQRMessageID, nil)
+				pendingQRMessageID = 0
+			}
+			sent, err := state.State.TelegramBot.SendPhoto(
+				cfg.Telegram.OwnerID,
+				gotgbot.InputFileByReader("telegram-login.png", bytes.NewReader(png)),
+				&gotgbot.SendPhotoOpts{Caption: "No Telegram do CELULAR: Configurações -> Dispositivos -> Conectar dispositivo. Escaneie este QR exibido no computador. Não use /tgcodigo."},
+			)
+			if err != nil { return err }
+			pendingQRMessageID = sent.MessageId
+			return nil
+		})
+		userClient.Start(context.Background())
+	}
+
+	// When encrypted backups are enabled, keep the bot online even when the
+	// WhatsApp session was lost. The owner can use /codigo from one phone.
+	deferPairing := backupManager != nil || os.Getenv("WATG_DEFER_PAIRING") == "1"
+	err = whatsapp.NewWhatsAppClientWithPairing(deferPairing)
 	if err != nil {
 		logger.Fatal("failed to initialize whatsapp client",
 			zap.Error(err),
@@ -195,6 +262,55 @@ func main() {
 	_ = logger.Sync()
 
 	state.State.StartTime = time.Now().UTC()
+	// Periodically re-discover all Telegram groups from their encrypted
+	// descriptions. No new groups by default until the owner authorizes it.
+	if cfg.Telegram.SeparateChats && userClient != nil {
+		// Separate-chat mode gradually creates all missing groups, one per sync cycle.
+		// Set WATG_AUTOCREATE_BATCH=0 to pause creating new groups.
+		autoCreate := 1
+		if raw := os.Getenv("WATG_AUTOCREATE_BATCH"); raw != "" {
+			count, parseErr := strconv.Atoi(raw)
+			if parseErr == nil && count >= 0 && count <= 5 {
+				autoCreate = count
+			}
+		}
+		go func() {
+			// Allow WhatsApp history-sync metadata to arrive first.
+			ticker := time.NewTicker(5 * time.Minute)
+			defer ticker.Stop()
+			for {
+				<-ticker.C
+				wa := state.State.WhatsAppClient
+				if wa == nil || !wa.IsLoggedIn() || !userClient.Ready() {continue}
+				ctx, cancel := context.WithTimeout(context.Background(), 12*time.Minute)
+				report, syncErr := userClient.Sync(ctx, autoCreate,
+					state.State.TelegramBot.Username)
+				cancel()
+				if syncErr != nil {
+					logger.Warn("Telegram group synchronization deferred", zap.Error(syncErr))
+				} else if report.Created > 0 || report.Recovered > 0 {
+					logger.Info("Telegram groups synchronized",
+						zap.Int("recovered", report.Recovered),
+						zap.Int("created", report.Created))
+				}
+			}
+		}()
+	}
+
+
+	// Snapshot only authenticated sessions; never overwrite a good backup
+	// with a newly created but unpaired device database.
+	if backupManager != nil {
+		backupManager.RunPeriodicBackup(context.Background(), 30*time.Minute,
+			func() bool {
+				waClient := state.State.WhatsAppClient
+				return waClient != nil && waClient.Store != nil &&
+					waClient.Store.ID != nil && waClient.IsLoggedIn()
+			},
+			func(backupErr error) {
+				logger.Error("encrypted Telegram session backup failed", zap.Error(backupErr))
+			})
+	}
 
 	s := gocron.NewScheduler(time.UTC)
 	s.TagsUnique()
@@ -205,7 +321,6 @@ func main() {
 		}
 	})
 
-	state.State.WhatsAppClient.AddEventHandler(whatsapp.WhatsAppEventHandler)
 	telegram.AddTelegramHandlers()
 	modules.LoadModuleHandlers()
 
@@ -229,7 +344,14 @@ func main() {
 	startMessageSuccessful := sendRestartNotification(logger)
 
 	if !startMessageSuccessful && !cfg.Telegram.SkipStartupMessage {
-		state.State.TelegramBot.SendMessage(cfg.Telegram.OwnerID, "Successfully started WaTgBridge", &gotgbot.SendMessageOpts{})
+		message := "Successfully started WaTgBridge"
+		if state.State.WhatsAppClient.Store.ID == nil {
+			message = "WATGBridge iniciado, mas o WhatsApp está sem sessão. " +
+				"Use /codigo 55DDDNÚMERO na conversa privada para conectar pelo celular."
+		} else if backupRestoreFailed {
+			message += "\\nAviso: não foi possível recuperar o backup criptografado do Telegram. Confira os logs."
+		}
+		state.State.TelegramBot.SendMessage(cfg.Telegram.OwnerID, message, &gotgbot.SendMessageOpts{})
 	}
 
 	utils.StartAutomaticDatabaseBackups()

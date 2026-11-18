@@ -1,12 +1,19 @@
 package whatsapp
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"html"
+	"os"
+	"io"
+	"strings"
+	"syscall"
 	"time"
 
 	"watgbridge/database"
 	"watgbridge/state"
+	"watgbridge/transfer"
 	"watgbridge/utils"
 
 	"github.com/PaulSonOfLars/gotgbot/v2"
@@ -26,7 +33,9 @@ type bridgeContext struct {
 	waClient     *whatsmeow.Client
 	bridgedText  string
 	replyToMsgId int64
+	tgChatID     int64
 	threadId     int64
+	placeholderID int64
 	msgId        string
 	senderStr    string
 	chatStr      string
@@ -39,17 +48,71 @@ func (bc *bridgeContext) savePair(sentMsg *gotgbot.Message) {
 	if sentMsg != nil && sentMsg.MessageId != 0 {
 		database.MsgIdAddNewPair(
 			bc.msgId, bc.senderStr, bc.chatStr,
-			bc.cfg.Telegram.TargetChatID,
+			bc.tgChatID,
 			sentMsg.MessageId, sentMsg.MessageThreadId,
 		)
+		if bc.placeholderID != 0 && bc.placeholderID != sentMsg.MessageId {
+			// Native stickers can't replace text via editMessageMedia.
+			_, _ = bc.tgBot.DeleteMessage(bc.tgChatID, bc.placeholderID, nil)
+			bc.placeholderID = 0
+		}
+		// Retain the in-flight reservation until the worker finishes, but
+		// mark the notice as delivered so it is not turned into an error.
+		markPendingMediaDelivered(bc.chatStr+"\x00"+bc.msgId)
 	}
+}
+
+// editPendingMedia uses Telegram's editMessageMedia API to replace the
+// initial waiting notice with the actual photo, video, document or audio.
+// This keeps the original chronological position of incoming WhatsApp media,
+// even when transfers were deferred behind more urgent messages.
+func (bc *bridgeContext) editPendingMedia(media gotgbot.InputMedia) bool {
+	if bc.placeholderID == 0 || bc.tgBot == nil || media == nil {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
+	defer cancel()
+	edited, ok, err := bc.tgBot.EditMessageMediaWithContext(ctx, media,
+		&gotgbot.EditMessageMediaOpts{
+			ChatId: bc.tgChatID, MessageId: bc.placeholderID,
+		})
+	if err != nil || !ok {
+		if bc.logger != nil {
+			bc.logger.Warn("Telegram could not replace media notice in-place",
+				zap.Error(err), zap.Int64("telegram_chat", bc.tgChatID))
+		}
+		return false
+	}
+	originalID := bc.placeholderID
+	bc.placeholderID = 0
+	if edited == nil {
+		edited = &gotgbot.Message{MessageId: originalID}
+	}
+	bc.savePair(edited)
+	return true
 }
 
 // sendFallbackText sends a text-only message (header + extra info) to
 // Telegram and saves the pair. Used when media cannot be sent.
 func (bc *bridgeContext) sendFallbackText(extraText string) {
+	if bc.placeholderID != 0 {
+		// Preserve an immediately registered media record even if WhatsApp
+		// download fails, the file is oversized, or Telegram rejects it.
+		// This notice is not a downloadable file and says so explicitly.
+		text := "Mídia recebida, mas o arquivo não pôde ser enviado agora. " +
+			"Ele continua disponível no WhatsApp, se ainda não tiver expirado."
+		_, ok, err := bc.tgBot.EditMessageText(&gotgbot.EditMessageTextOpts{
+			ChatId: bc.tgChatID, MessageId: bc.placeholderID, Text: text,
+		})
+		if err == nil && ok {
+			id := bc.placeholderID
+			bc.placeholderID = 0
+			bc.savePair(&gotgbot.Message{MessageId: id})
+			return
+		}
+	}
 	sentMsg, _ := bc.tgBot.SendMessage(
-		bc.cfg.Telegram.TargetChatID,
+		bc.tgChatID,
 		bc.bridgedText+extraText,
 		&gotgbot.SendMessageOpts{
 			ReplyParameters: utils.TgMakeReplyParameters(bc.replyToMsgId, 0),
@@ -57,6 +120,149 @@ func (bc *bridgeContext) sendFallbackText(extraText string) {
 		},
 	)
 	bc.savePair(sentMsg)
+}
+
+// mediaTransferSlot keeps at most one WhatsApp media byte buffer alive while
+// it is being uploaded to Telegram. On 256 MB RAM, downloading several 50 MB
+// videos simultaneously would crash the process.
+var mediaTransferSlot = make(chan struct{}, 1)
+var mediaTransferBudget transfer.Limiter
+// Only sticker conversions still require bytes in memory; cap them hard.
+const maxMediaInRAM int64 = 8 * 1024 * 1024
+
+// downloadMedia returns a release callback that MUST run after the Telegram
+// upload (not immediately after WhatsApp download) so byte buffers cannot
+// overlap. This limit is independent of the planned 600MB disk quota.
+func (bc *bridgeContext) downloadMedia(message whatsmeow.DownloadableMessage, declaredBytes uint64) ([]byte, func(), error) {
+	size := int64(declaredBytes)
+	if size <= 0 || size > maxMediaInRAM {
+		return nil,nil,errors.New("figurinha acima de 8 MiB ou sem tamanho informado; envio seguro indisponível")
+	}
+	select {
+	case mediaTransferSlot <- struct{}{}:
+	case <-time.After(2 * time.Minute):
+		return nil,nil,errors.New("limite de transferência ocupado; tente novamente mais tarde")
+	}
+	releaseSpace,err:=mediaTransferBudget.Reserve(size)
+	if err!=nil {
+		<-mediaTransferSlot
+		return nil,nil,err
+	}
+	release:=func(){releaseSpace();<-mediaTransferSlot}
+	ctx,cancel:=context.WithTimeout(context.Background(),3*time.Minute)
+	defer cancel()
+	data,err:=bc.waClient.Download(ctx,message)
+	if err!=nil {
+		release()
+		return nil,nil,err
+	}
+	if len(data)>int(maxMediaInRAM){
+		release()
+		return nil,nil,errors.New("mídia ultrapassou o limite seguro de memória")
+	}
+	return data,release,nil
+}
+
+// downloadMediaToTemp streams directly from authenticated WhatsApp media
+// storage into an ephemeral file. The media never exists as a full []byte in
+// the process, so Telegram can upload it with minimal additional RAM.
+// The caller MUST defer the returned cleanup function until the Telegram
+// upload finishes. The file is deleted immediately afterwards.
+func (bc *bridgeContext) downloadMediaToTemp(message whatsmeow.DownloadableMessage, declaredBytes uint64) (*os.File, func(), error) {
+	const maxTempFile = int64(600 * 1024 * 1024)
+	if declaredBytes == 0 || declaredBytes > uint64(maxTempFile) {
+		return nil, nil, errors.New("mídia sem tamanho conhecido ou maior que 600 MB")
+	}
+	size := int64(declaredBytes)
+	// Only one heavy media download/upload at a time on 256 MB of RAM.
+	select {
+	case mediaTransferSlot <- struct{}{}:
+	case <-time.After(2 * time.Minute):
+		return nil,nil,errors.New("fila de downloads ocupada; tente novamente")
+	}
+	releaseSpace,err:=mediaTransferBudget.Reserve(size)
+	if err!=nil { <-mediaTransferSlot; return nil,nil,err }
+
+	// The advertised 600 MB budget is an upper limit, not a guarantee that
+	// the ephemeral disk really has 600 MB free. Protect at least 100 MiB
+	// of space for SQLite, login state and the running process.
+	var disk syscall.Statfs_t
+	if err:=syscall.Statfs(os.TempDir(),&disk);err!=nil {
+		releaseSpace(); <-mediaTransferSlot
+		return nil,nil,err
+	}
+	available:=uint64(disk.Bavail)*uint64(disk.Bsize)
+	if available < uint64(size)+100*1024*1024 {
+		releaseSpace(); <-mediaTransferSlot
+		return nil,nil,errors.New("sem espaço temporário suficiente para mídia e margem de segurança")
+	}
+
+	file,err:=os.CreateTemp("", "watg-media-*.tmp")
+	if err!=nil {releaseSpace();<-mediaTransferSlot;return nil,nil,err}
+	cleanup:=func(){
+		_ = file.Close()
+		_ = os.Remove(file.Name())
+		releaseSpace()
+		<-mediaTransferSlot
+	}
+	ctx,cancel:=context.WithTimeout(context.Background(),5*time.Minute)
+	defer cancel()
+	// DownloadToFile uses WhatsApp's authenticated, encrypted-media download.
+	// Unlike Download, it does not assemble a full media []byte in RAM.
+	if err:=bc.waClient.DownloadToFile(ctx,message,file);err!=nil {
+		cleanup();return nil,nil,err
+	}
+	info,err:=file.Stat()
+	if err!=nil {cleanup();return nil,nil,err}
+	if info.Size()<=0||info.Size()>maxTempFile||info.Size()>size+1024*1024 {
+		cleanup();return nil,nil,errors.New("arquivo excedeu o espaço reservado")
+	}
+	if _,err:=file.Seek(0,io.SeekStart);err!=nil {
+		cleanup();return nil,nil,err
+	}
+	return file,cleanup,nil
+}
+
+// senderPhone extracts a WhatsApp-provided phone-number JID.
+// LIDs are opaque identifiers and must never be guessed as phone numbers.
+func senderPhone(jid waTypes.JID) string {
+	if jid.Server != "s.whatsapp.net" || jid.User == "" { return "" }
+	raw := jid.User
+	for _, digit := range raw {
+		if digit < '0' || digit > '9' { return "" }
+	}
+	if strings.HasPrefix(raw, "55") && len(raw) >= 12 { return raw[2:] }
+	return raw
+}
+
+// groupSenderLabel shows the name and verified phone (if the WhatsApp event
+// provides one) without confusing a LID with a Brazilian number.
+func groupSenderLabel(name string, sender, senderAlt waTypes.JID) string {
+	number := senderPhone(sender)
+	if number == "" { number = senderPhone(senderAlt) }
+	name = strings.TrimSpace(name)
+	if number == "" { return name }
+	if name == "" || name == number || name == "55"+number || name == "+55"+number {
+		return number
+	}
+	if strings.Contains(name, number) { return name }
+	return name + " (" + number + ")"
+}
+
+// videoFileName handles absent or malformed WhatsApp MIME types safely.
+// A corrupted or unexpected MIME label must never crash the entire bridge.
+func videoFileName(contentType string) string {
+	mediaType := strings.ToLower(strings.TrimSpace(strings.SplitN(contentType, ";", 2)[0]))
+	switch mediaType {
+	case "video/webm":
+		return "video.webm"
+	case "video/3gpp":
+		return "video.3gp"
+	case "video/quicktime":
+		return "video.mov"
+	default:
+		return "video.mp4"
+	}
 }
 
 // addCaption appends a caption (truncated at 1020 chars if needed) to

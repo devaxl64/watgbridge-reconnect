@@ -2,6 +2,9 @@ package state
 
 import (
 	"fmt"
+	"errors"
+	"strconv"
+	"strings"
 	"io"
 	"net/url"
 	"os"
@@ -27,6 +30,7 @@ type Config struct {
 		SudoUsersID         []int64 `yaml:"sudo_users_id"`
 		OwnerID             int64   `yaml:"owner_id"`
 		TargetChatID        int64   `yaml:"target_chat_id"`
+		SeparateChats       bool    `yaml:"separate_chats"`
 		SelfHostedAPI       bool    `yaml:"self_hosted_api"`
 		SendImagesAsFile    bool    `yaml:"send_images_as_file"`
 		SendStickersAsFile   bool    `yaml:"send_stickers_as_file"`
@@ -95,6 +99,11 @@ func (cfg *Config) LoadConfig() error {
 	configFilePath := cfg.Path
 
 	if _, err := os.Stat(configFilePath); err != nil {
+		// A container deployed from a registry image may have only runtime
+		// environment variables, with no mounted YAML config file.
+		if errors.Is(err, os.ErrNotExist) && os.Getenv("BOT_TOKEN") != "" {
+			return cfg.ApplyRuntimeEnvironment()
+		}
 		return fmt.Errorf("error with config file path : %s", err)
 	}
 
@@ -128,10 +137,51 @@ func (cfg *Config) LoadConfig() error {
 			}
 			parsedUrl.RawQuery = q.Encode()
 			cfg.WhatsApp.LoginDatabase.URL = parsedUrl.String()
-			cfg.SaveConfig()
 		}
 	}
 
+	return cfg.ApplyRuntimeEnvironment()
+}
+
+// ApplyRuntimeEnvironment is compatible with both the original YAML-based
+// deployment and existing Northflank environment-only services.
+// It fills missing fields, never overwrites values already in config.yaml.
+func (cfg *Config) ApplyRuntimeEnvironment() error {
+	if cfg.Telegram.BotToken == "" {
+		cfg.Telegram.BotToken = strings.TrimSpace(os.Getenv("BOT_TOKEN"))
+	}
+	if cfg.Telegram.OwnerID == 0 {
+		if owner := strings.TrimSpace(os.Getenv("OWNER_ID")); owner != "" {
+			id, err := strconv.ParseInt(owner, 10, 64)
+			if err != nil || id <= 0 { return errors.New("OWNER_ID must be a positive Telegram user ID") }
+			cfg.Telegram.OwnerID = id
+		}
+	}
+	if cfg.Telegram.TargetChatID == 0 {
+		if target := strings.TrimSpace(os.Getenv("TARGET_CHAT_ID")); target != "" {
+			id, err := strconv.ParseInt(target, 10, 64)
+			if err != nil || id == 0 { return errors.New("TARGET_CHAT_ID must be a Telegram chat ID") }
+			cfg.Telegram.TargetChatID = id
+		}
+	}
+	if os.Getenv("WATG_SEPARATE_CHATS") == "1" { cfg.Telegram.SeparateChats = true }
+	if cfg.Database == nil { cfg.Database = map[string]string{} }
+	if cfg.Database["type"] == "" { cfg.Database["type"] = "sqlite" }
+	if cfg.Database["type"] == "sqlite" && cfg.Database["path"] == "" {
+		cfg.Database["path"] = "./gobot.sqlite.db"
+	}
+	if cfg.Telegram.BotToken == "" {
+		return errors.New("Telegram bot token missing: set BOT_TOKEN or telegram.bot_token")
+	}
+	if cfg.Telegram.OwnerID <= 0 {
+		return errors.New("Telegram owner missing: set OWNER_ID or telegram.owner_id")
+	}
+	if cfg.Telegram.SeparateChats && cfg.Telegram.TargetChatID == 0 {
+		return errors.New("TARGET_CHAT_ID or telegram.target_chat_id is needed for legacy compatibility")
+	}
+	if len(cfg.Telegram.SudoUsersID) == 0 {
+		cfg.Telegram.SudoUsersID = []int64{cfg.Telegram.OwnerID}
+	}
 	return nil
 }
 

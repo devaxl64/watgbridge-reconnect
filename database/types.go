@@ -22,6 +22,13 @@ type MsgIdPair struct {
 	AutoReacted bool
 }
 
+// ChatRoute maps one WhatsApp chat to one Telegram group (no forum topics).
+// Each Telegram group can belong to only one WhatsApp chat.
+type ChatRoute struct {
+	WaChatID string `gorm:"primaryKey;column:wa_chat_id"`
+	TgChatID int64  `gorm:"uniqueIndex;not null;column:tg_chat_id"`
+}
+
 type ChatThreadPair struct {
 	ID         string `gorm:"primaryKey;"` // WhatsApp Chat ID
 	TgChatId   int64  // Telegram Chat ID
@@ -56,6 +63,8 @@ func AutoMigrate() error {
 	err := db.AutoMigrate(
 		&MsgIdPair{},
 		&ChatThreadPair{},
+		&ChatRoute{},
+		&KnownChat{},
 		&ContactName{},
 		&ChatEphemeralSettings{},
 		&MessageReceipt{},

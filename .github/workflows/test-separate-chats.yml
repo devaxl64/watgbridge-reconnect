@@ -1,0 +1,30 @@
+name: Test separate-chat routes
+
+on:
+  pull_request:
+    paths:
+      - 'database/**'
+      - 'transfer/**'
+      - 'sessionbackup/**'
+      - 'telegram/**'
+      - 'whatsapp/**'
+      - 'utils/**'
+      - 'state/**'
+      - 'main.go'
+      - 'go.mod'
+      - 'go.sum'
+      - '.github/workflows/test-separate-chats.yml'
+  workflow_dispatch:
+
+jobs:
+  routing-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Run routing tests
+        run: go test ./...
+      - name: Compile the complete bridge
+        run: go build ./...
