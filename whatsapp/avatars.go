@@ -42,7 +42,8 @@ func QueueProfileRefresh(jid waTypes.JID) {
 		!state.State.WhatsAppClient.IsLoggedIn() {
 		return
 	}
-	key := jid.ToNonAD().String()
+	jid = CanonicalChatJID(jid)
+	key := jid.String()
 	avatarScanner.Lock()
 	last := avatarScanner.lastCheck[key]
 	if avatarScanner.pending[key] || time.Since(last) < avatarCheckCooldown {
@@ -95,7 +96,8 @@ func DownloadAvatarPreview(ctx context.Context, imageURL string) ([]byte, error)
 
 func UpdateProfilePictureForChat(ctx context.Context, jid waTypes.JID) error {
 	if !state.State.Config.Telegram.SeparateChats { return nil }
-	chatID := jid.ToNonAD().String()
+	jid = CanonicalChatJID(jid)
+	chatID := jid.String()
 	tgID, linked, err := database.TelegramGroupForWhatsApp(chatID)
 	if err != nil || !linked { return err }
 	wa := state.State.WhatsAppClient
