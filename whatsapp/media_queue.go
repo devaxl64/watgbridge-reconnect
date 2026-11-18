@@ -66,6 +66,15 @@ func setPendingMedia(key string, info mediaPlaceholder) {
 	pendingMedia.Unlock()
 }
 
+// markPendingMediaDelivered does not allocate a new entry for plain text.
+func markPendingMediaDelivered(key string) {
+	pendingMedia.Lock()
+	if _, exists := pendingMedia.items[key]; exists {
+		pendingMedia.items[key] = mediaPlaceholder{}
+	}
+	pendingMedia.Unlock()
+}
+
 func mediaPlaceholderFor(v *events.Message) mediaPlaceholder {
 	pendingMedia.Lock()
 	defer pendingMedia.Unlock()
@@ -213,6 +222,10 @@ func startMediaWorker() {
 				func() {
 					defer clearPendingMedia(key)
 					handleMessageEvent(job.cfg, job.message)
+					if pending := mediaPlaceholderFor(job.message); pending.messageID != 0 {
+						updatePendingMediaText(pending,
+							"Mídia recebida, mas o arquivo não pôde ser entregue ao Telegram. Consulte o original no WhatsApp.")
+					}
 				}()
 			}
 		}()
