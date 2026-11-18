@@ -80,7 +80,14 @@ func WhatsAppEventHandler(evt interface{}) {
 		if v.Info.IsGroup && !v.Info.MessageSource.Sender.IsEmpty() {
 			QueueProfileRefresh(v.Info.MessageSource.Sender)
 		}
-		handleMessageEvent(cfg, v)
+		// Plain text, replies, edits and deletes run immediately.
+		// Downloads run through a bounded priority queue (documents,
+		// photos, then videos) so large uploads don't delay text.
+		if mediaPriority(v.Message) >= 0 {
+			enqueueMedia(cfg, v)
+		} else {
+			handleMessageEvent(cfg, v)
+		}
 	}
 }
 
