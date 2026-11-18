@@ -49,10 +49,10 @@ func TgOutgoingMediaLimitNotice(msg *gotgbot.Message, selfHostedAPI bool) string
 	if size <= 0 { return "" }
 	actualSize := strings.ReplaceAll(fmt.Sprintf("%.1f", float64(size)/(1024*1024)), ".", ",")
 	if size > MaxForwardMediaSize {
-		return fmt.Sprintf("Limite de envio: 50 MB (arquivo: %s MB). Nada foi enviado ao WhatsApp.", actualSize)
+		return fmt.Sprintf("Não foi possível baixar o arquivo (%s MB). Limite configurado: 50 MB.", actualSize)
 	}
 	if !selfHostedAPI && size > DownloadSizeLimit {
-		return fmt.Sprintf("O bot só consegue baixar arquivos de até 20 MB (arquivo: %s MB). Nada foi enviado ao WhatsApp.", actualSize)
+		return fmt.Sprintf("Não foi possível baixar o arquivo (%s MB). Limite do bot: 20 MB.", actualSize)
 	}
 	return ""
 }
