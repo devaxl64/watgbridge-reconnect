@@ -1,0 +1,24 @@
+name: Test session recovery
+
+on:
+  pull_request:
+    paths:
+      - 'sessionbackup/**'
+      - 'main.go'
+      - 'telegram/**'
+      - 'whatsapp/**'
+      - '.github/workflows/test-session-recovery.yml'
+  workflow_dispatch:
+
+jobs:
+  test-recovery:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Test encrypted session snapshots and Telegram backup
+        run: go test ./sessionbackup
+      - name: Compile complete WhatsApp bridge
+        run: go build ./...
