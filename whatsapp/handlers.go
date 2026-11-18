@@ -1700,7 +1700,7 @@ func RevokedMessageEventHandler(v *events.Message) {
 		waChatId    = v.Info.Chat.String()
 	)
 
-	if !cfg.WhatsApp.SendRevokedMessageUpdates {
+	if !cfg.WhatsApp.SendRevokedMessageUpdates && !cfg.Telegram.SeparateChats {
 		return
 	}
 
@@ -1715,6 +1715,13 @@ func RevokedMessageEventHandler(v *events.Message) {
 	tgChatId, tgThreadId, tgMsgId, err := database.MsgIdGetTgFromWa(waMsgId, waChatId)
 	if err != nil || tgChatId == 0 || tgMsgId == 0 {
 		return
+	}
+	if cfg.Telegram.SeparateChats {
+		// A WhatsApp revoke removes its Telegram copy where the Bot API
+		// allows it (generally within the platform's deletion window).
+		if deleted, deleteErr := tgBot.DeleteMessage(tgChatId, tgMsgId, nil); deleteErr == nil && deleted {
+			return
+		}
 	}
 
 	tgBot.SendMessage(tgChatId,
