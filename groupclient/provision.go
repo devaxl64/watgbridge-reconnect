@@ -49,13 +49,19 @@ func (m *Manager) Sync(ctx context.Context, maxNew int, botUsername string) (Rep
 			if err!=nil{return err} // never create groups on incomplete scan
 			report.Found=len(found)
 			for waID, ch:=range found {
+			kind:="private"
+			if strings.HasSuffix(waID,"@g.us"){kind="group"}
+			// Old versions could create a group for placeholder chat ID "0".
+			// Preserve that Telegram group; don't restore it as a usable route.
+			if !database.IsActionableKnownChat(database.KnownChat{WaChatID:waID,Kind:kind}) {
+				report.Skipped++
+				continue
+			}
 			_,wasLinked,lookupErr:=database.TelegramGroupForWhatsApp(waID)
 			if lookupErr!=nil{return lookupErr}
 			if err:=database.EnsureSeparateChat(waID,SupergroupID(ch.ID));err!=nil {
 				return fmt.Errorf("recovery conflict for %s: %w",waID,err)
 			}
-			kind:="private"
-			if strings.HasSuffix(waID,"@g.us"){kind="group"}
 			if err:=database.RecordKnownChat(database.KnownChat{
 				WaChatID:waID,Kind:kind,Name:ch.Title,Source:"telegram-recovery",
 			});err!=nil{return err}
@@ -70,6 +76,7 @@ func (m *Manager) Sync(ctx context.Context, maxNew int, botUsername string) (Rep
 		for _,chat:=range chats {
 			if report.Created>=maxNew {break}
 			if ctx.Err()!=nil{return ctx.Err()}
+			if !database.IsActionableKnownChat(chat) {report.Skipped++;continue}
 			_,linked,err:=database.TelegramGroupForWhatsApp(chat.WaChatID)
 			if err!=nil{return err}
 			if linked {report.Skipped++;continue}
