@@ -35,14 +35,15 @@ Nenhuma chave de login deve ser enviada ao ChatGPT ou publicada num repositório
 Todos os comandos de login e descoberta devem ser enviados na **conversa privada** com `@Wpp_TBot`, pelo proprietário.
 
 1. `/tgstatus`: conferir que a conta de usuário Telegram está configurada.
-2. `/tglogin`: iniciar vinculação da sessão MTProto.
-3. `/tgcodigo 12345`: informar o código recebido (a mensagem contendo o código é removida pelo bot assim que lida). Usar apenas o bot controlado pelo proprietário.
-4. `/status`: consultar o WhatsApp. Se estiver sem sessão, executar `/codigo 55DDDNÚMERO` e inserir o código de pareamento no próprio WhatsApp, em **Dispositivos conectados**.
-5. `/conversas`: conferir totais de conversas individuais e grupos identificados. `/conversas lista` e `/conversas lista 2` exibem páginas do **catálogo inteiro**, sem corte total de 20.
-6. `/criarchats 0`: recuperar associações existentes sem criar duplicações; criação nova é gradual e automática quando `separate_chats` está ativo.
-7. Verificar que chegou um documento criptografado de backup na conversa privada com legenda `WATGBRIDGE_SESSION_BACKUP_V1`, fixado. **Não remover o documento fixado nem fixar outras mensagens sobre ele**, pois a recuperação depende dele.
-8. Trocar textos, respostas citadas, fotos, figurinhas, áudios, documentos e vídeos pequenos com ao menos um contato e um grupo WhatsApp reais. Confirmar que a ordenação e os avatares estão corretos.
-9. Só depois de confirmar backup válido, provocar **um reinício controlado** e validar: `/status`, `/tgstatus`, ausência de QR automático, permanência dos mesmos grupos Telegram e mensagens sem duplicações.
+2. `/tglogin`: solicitar o QR Code temporário para autenticação MTProto; o bot entrega uma imagem na conversa privada do proprietário.
+3. Abra a conversa com o bot no **computador**. No Telegram do **celular**, vá a **Configurações → Dispositivos → Conectar dispositivo** e leia o QR na tela do computador; aprove a vinculação se solicitado. **Nunca envie códigos numéricos em chats**: o Telegram invalida imediatamente códigos compartilhados em mensagens. O comando `/tgcodigo` foi desativado.
+4. `/tgstatus`: confirme a autenticação da conta pessoal. Se o QR expirar, solicite um novo com `/tglogin`.
+5. `/status`: consultar o WhatsApp. Se estiver sem sessão, executar `/codigo 55DDDNÚMERO` e inserir o código de pareamento no próprio WhatsApp, em **Dispositivos conectados**.
+6. `/conversas`: conferir totais de conversas individuais e grupos identificados. `/conversas lista` e `/conversas lista 2` exibem páginas do **catálogo inteiro**, sem corte total de 20.
+7. `/criarchats 0`: recuperar associações existentes sem criar duplicações; criação nova é gradual e automática quando `separate_chats` está ativo.
+8. Verificar que chegou um documento criptografado de backup na conversa privada com legenda `WATGBRIDGE_SESSION_BACKUP_V1`, fixado. **Não remover o documento fixado nem fixar outras mensagens sobre ele**, pois a recuperação depende dele.
+9. Trocar textos, respostas citadas, fotos, figurinhas, áudios, documentos e vídeos pequenos com ao menos um contato e um grupo WhatsApp reais. Confirmar que a ordenação e os avatares estão corretos.
+10. Só depois de confirmar backup válido, provocar **um reinício controlado** e validar: `/status`, `/tgstatus`, ausência de QR automático, permanência dos mesmos grupos Telegram e mensagens sem duplicações.
 
 ## Limites atuais e critérios para concluir a validação
 
