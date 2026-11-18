@@ -854,7 +854,7 @@ func (bc *bridgeContext) handleImageMessage(v *events.Message) {
 		return
 	}
 
-	imageBytes, releaseMedia, err := bc.downloadMedia(imageMsg, uint64(imageMsg.GetFileLength()))
+	imageFile, releaseMedia, err := bc.downloadMediaToTemp(imageMsg, uint64(imageMsg.GetFileLength()))
 	if err != nil {
 		bc.sendFallbackText("\n<i>Couldn't download the photo due to some errors</i>")
 		return
@@ -864,9 +864,12 @@ func (bc *bridgeContext) handleImageMessage(v *events.Message) {
 	addCaption(&bc.bridgedText, imageMsg.GetCaption())
 
 	if bc.cfg.Telegram.SendImagesAsFile {
-		fileName := "image." + strings.Split(http.DetectContentType(imageBytes), "/")[1]
+		fileName := "image.jpg"
+		if strings.EqualFold(imageMsg.GetMimetype(), "image/png") {
+			fileName = "image.png"
+		}
 		sentMsg, _ := bc.tgBot.SendDocument(bc.tgChatID,
-			&gotgbot.FileReader{Name: fileName, Data: bytes.NewReader(imageBytes)},
+			&gotgbot.FileReader{Name: fileName, Data: imageFile},
 			&gotgbot.SendDocumentOpts{
 				Caption:         bc.bridgedText,
 				ReplyParameters: utils.TgMakeReplyParameters(bc.replyToMsgId, 0),
@@ -877,7 +880,7 @@ func (bc *bridgeContext) handleImageMessage(v *events.Message) {
 	}
 
 	sentMsg, _ := bc.tgBot.SendPhoto(bc.tgChatID,
-		&gotgbot.FileReader{Data: bytes.NewReader(imageBytes)},
+		&gotgbot.FileReader{Data: imageFile},
 		&gotgbot.SendPhotoOpts{
 			Caption:         bc.bridgedText,
 			ReplyParameters: utils.TgMakeReplyParameters(bc.replyToMsgId, 0),
@@ -902,7 +905,7 @@ func (bc *bridgeContext) handleGifMessage(v *events.Message) {
 		return
 	}
 
-	gifBytes, releaseMedia, err := bc.downloadMedia(gifMsg, uint64(gifMsg.GetFileLength()))
+	gifFile, releaseMedia, err := bc.downloadMediaToTemp(gifMsg, uint64(gifMsg.GetFileLength()))
 	if err != nil {
 		bc.sendFallbackText("\n<i>Couldn't download the GIF due to some errors</i>")
 		return
@@ -912,7 +915,7 @@ func (bc *bridgeContext) handleGifMessage(v *events.Message) {
 	addCaption(&bc.bridgedText, gifMsg.GetCaption())
 
 	sentMsg, _ := bc.tgBot.SendAnimation(bc.tgChatID,
-		&gotgbot.FileReader{Name: "animation.gif", Data: bytes.NewReader(gifBytes)},
+		&gotgbot.FileReader{Name: "animation.mp4", Data: gifFile},
 		&gotgbot.SendAnimationOpts{
 			Caption:         bc.bridgedText,
 			ReplyParameters: utils.TgMakeReplyParameters(bc.replyToMsgId, 0),
@@ -944,7 +947,7 @@ func (bc *bridgeContext) handleVideoMessage(v *events.Message) {
 		return
 	}
 
-	videoBytes, releaseMedia, err := bc.downloadMedia(videoMsg, uint64(videoMsg.GetFileLength()))
+	videoFile, releaseMedia, err := bc.downloadMediaToTemp(videoMsg, uint64(videoMsg.GetFileLength()))
 	if err != nil {
 		bc.sendFallbackText("\n<i>Couldn't download the video due to some errors</i>")
 		return
@@ -955,7 +958,7 @@ func (bc *bridgeContext) handleVideoMessage(v *events.Message) {
 
 	fileToSend := gotgbot.FileReader{
 		Name: "video." + strings.Split(videoMsg.GetMimetype(), "/")[1],
-		Data: bytes.NewReader(videoBytes),
+		Data: videoFile,
 	}
 
 	var sentMsg *gotgbot.Message
@@ -993,7 +996,7 @@ func (bc *bridgeContext) handleVoiceNoteMessage(v *events.Message) {
 		return
 	}
 
-	audioBytes, releaseMedia, err := bc.downloadMedia(audioMsg, uint64(audioMsg.GetFileLength()))
+	audioFile, releaseMedia, err := bc.downloadMediaToTemp(audioMsg, uint64(audioMsg.GetFileLength()))
 	if err != nil {
 		bc.sendFallbackText("\n<i>Couldn't download the audio due to some errors</i>")
 		return
@@ -1001,7 +1004,7 @@ func (bc *bridgeContext) handleVoiceNoteMessage(v *events.Message) {
 	defer releaseMedia()
 
 	sentMsg, _ := bc.tgBot.SendAudio(bc.tgChatID,
-		&gotgbot.FileReader{Name: "audio.ogg", Data: bytes.NewReader(audioBytes)},
+		&gotgbot.FileReader{Name: "audio.ogg", Data: audioFile},
 		&gotgbot.SendAudioOpts{
 			Caption:         bc.bridgedText,
 			Duration:        int64(audioMsg.GetSeconds()),
@@ -1026,7 +1029,7 @@ func (bc *bridgeContext) handleAudioMessage(v *events.Message) {
 		return
 	}
 
-	audioBytes, releaseMedia, err := bc.downloadMedia(audioMsg, uint64(audioMsg.GetFileLength()))
+	audioFile, releaseMedia, err := bc.downloadMediaToTemp(audioMsg, uint64(audioMsg.GetFileLength()))
 	if err != nil {
 		bc.sendFallbackText("\n<i>Couldn't download the audio due to some errors</i>")
 		return
@@ -1034,7 +1037,7 @@ func (bc *bridgeContext) handleAudioMessage(v *events.Message) {
 	defer releaseMedia()
 
 	sentMsg, _ := bc.tgBot.SendAudio(bc.tgChatID,
-		&gotgbot.FileReader{Name: "audio.m4a", Data: bytes.NewReader(audioBytes)},
+		&gotgbot.FileReader{Name: "audio.m4a", Data: audioFile},
 		&gotgbot.SendAudioOpts{
 			Caption:         bc.bridgedText,
 			Duration:        int64(audioMsg.GetSeconds()),
@@ -1059,7 +1062,7 @@ func (bc *bridgeContext) handleDocumentMessage(v *events.Message) {
 		return
 	}
 
-	documentBytes, releaseMedia, err := bc.downloadMedia(documentMsg, uint64(documentMsg.GetFileLength()))
+	documentFile, releaseMedia, err := bc.downloadMediaToTemp(documentMsg, uint64(documentMsg.GetFileLength()))
 	if err != nil {
 		bc.sendFallbackText("\n<i>Couldn't download the document due to some errors</i>")
 		return
@@ -1069,7 +1072,7 @@ func (bc *bridgeContext) handleDocumentMessage(v *events.Message) {
 	addCaption(&bc.bridgedText, documentMsg.GetCaption())
 
 	sentMsg, _ := bc.tgBot.SendDocument(bc.tgChatID,
-		&gotgbot.FileReader{Name: documentMsg.GetFileName(), Data: bytes.NewReader(documentBytes)},
+		&gotgbot.FileReader{Name: documentMsg.GetFileName(), Data: documentFile},
 		&gotgbot.SendDocumentOpts{
 			Caption:         bc.bridgedText,
 			ReplyParameters: utils.TgMakeReplyParameters(bc.replyToMsgId, 0),
@@ -1137,7 +1140,7 @@ func (bc *bridgeContext) handleStickerMessage(v *events.Message) {
 		// Fallback: try GIF conversion
 		if gifBytes, err := utils.AnimatedWebpConvertToGif(stickerBytes, v.Info.ID); err == nil {
 			sentMsg, _ := bc.tgBot.SendAnimation(bc.tgChatID,
-				&gotgbot.FileReader{Name: "animation.gif", Data: bytes.NewReader(gifBytes)},
+				&gotgbot.FileReader{Name: "animation.gif", Data: gifFile},
 				&gotgbot.SendAnimationOpts{
 					Caption:         bc.bridgedText,
 					ReplyParameters: utils.TgMakeReplyParameters(bc.replyToMsgId, 0),
