@@ -61,7 +61,7 @@ func Connect() (*gorm.DB, error) {
 			return nil, fmt.Errorf("Error: database config for type '%s' requires the keys %+v", dbType, missingKeys)
 		}
 
-		return gorm.Open(sqlite.Open(dbConfig["path"]), &gormConfig)
+		return openSQLiteDatabase(dbConfig["path"], &gormConfig)
 
 	case "mysql":
 
@@ -83,4 +83,23 @@ func Connect() (*gorm.DB, error) {
 	}
 
 	return nil, fmt.Errorf("Database of type '%s' is not supported", dbType)
+}
+
+// openSQLiteDatabase configures a single shared SQLite writer for the bridge.
+// Multiple GORM pooled SQLite connections can otherwise race and return
+// "database is locked" when contacts, routes and receipts arrive together.
+func openSQLiteDatabase(path string, cfg *gorm.Config) (*gorm.DB, error) {
+	db, err := gorm.Open(sqlite.Open(path), cfg)
+	if err != nil { return nil, err }
+	pool, err := db.DB()
+	if err != nil { return nil, err }
+	pool.SetMaxOpenConns(1)
+	pool.SetMaxIdleConns(1)
+	if err := db.Exec("PRAGMA busy_timeout = 10000").Error; err != nil {
+		return nil, fmt.Errorf("SQLite busy timeout setup failed: %w", err)
+	}
+	if err := db.Exec("PRAGMA journal_mode = WAL").Error; err != nil {
+		return nil, fmt.Errorf("SQLite WAL setup failed: %w", err)
+	}
+	return db, nil
 }
