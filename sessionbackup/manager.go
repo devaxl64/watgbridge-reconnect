@@ -95,33 +95,35 @@ func (m *Manager) RunPeriodicBackup(ctx context.Context, interval time.Duration,
 		interval = 30 * time.Minute
 	}
 	go func() {
-		// The initial delay allows WhatsApp's post-pair history sync to settle.
-		initial := time.NewTimer(30 * time.Second)
-		defer initial.Stop()
-		select {
-		case <-ctx.Done():
-			return
-		case <-initial.C:
-		}
-		tryBackup := func() {
-			if shouldBackup != nil && !shouldBackup() {
-				return
-			}
-			opCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
-			defer cancel()
-			if err := m.Save(opCtx); err != nil && report != nil {
-				report(err)
-			}
-		}
-		tryBackup()
-		ticker := time.NewTicker(interval)
+		ticker := time.NewTicker(30 * time.Second)
 		defer ticker.Stop()
+		var nextAttempt time.Time
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				tryBackup()
+				if shouldBackup != nil && !shouldBackup() {
+					continue
+				}
+				if time.Now().Before(nextAttempt) {
+					continue
+				}
+				opCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
+				err := m.Save(opCtx)
+				cancel()
+				if err != nil {
+					if report != nil {
+						report(err)
+					}
+					// Retrying every 30 seconds during Telegram outages would
+					// cause unnecessary load and repeated error messages.
+					nextAttempt = time.Now().Add(5 * time.Minute)
+				} else {
+					// Upload promptly after the first successful pairing,
+					// then update the private pinned backup periodically.
+					nextAttempt = time.Now().Add(interval)
+				}
 			}
 		}
 	}()
