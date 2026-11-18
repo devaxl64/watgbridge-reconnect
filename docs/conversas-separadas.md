@@ -47,6 +47,39 @@
 - Uma conta de bot no Telegram não representa nativamente cada pessoa do WhatsApp; nomes de remetentes dentro de grupos precisam ser exibidos como texto/atribuição da mensagem.
 - Não substituir a imagem do Northflank em produção antes de concluir os testes.
 
+
+## Requisitos ajustados: reaproveitamento de chats, identidade e mídia
+
+### Recuperação das conversas sem duplicar grupos
+
+1. O identificador principal é o JID estável da conversa WhatsApp (contato/grupo). O telefone normalizado é um **identificador secundário** para contatos brasileiros, mostrado **sem +55** e sem ser a única prova de identidade. Telefones podem mudar, ser reciclados ou não estar disponíveis (LID/privacidade).
+2. Cada grupo criado no Telegram deve registrar metadados técnicos da associação (JID, grupo Telegram e, quando verificável, número normalizado), preferencialmente em **descrição/registro administrativo privado no Telegram**. Não depender de nome e foto porque ambos mudam.
+3. Na inicialização, a conta de usuário MTProto percorre os **grupos da ponte**, recupera e valida as associações e então mantém um índice leve em RAM. Em falta de associação durante recebimento, buscar primeiro o registro no Telegram, depois procurar telefone/nome somente como **candidato** e validar antes de reaproveitar. Se houver ambiguidade, **não criar novo grupo nem atribuir conversa errada automaticamente**.
+4. Nunca varrer o histórico inteiro a cada mensagem. Usar índice e consulta pontual; permitir varredura completa de recuperação só após reiniciar/perder mapeamento. Bots via Bot API não acessam livremente histórico antigo; varredura exige **sessão de usuário MTProto**.
+5. Persistir a sessão criptográfica WhatsApp e a da conta Telegram **não é o mesmo que salvar associações**. O 1 GB é efêmero: arquivos locais somem em reinicializações/substituição. Rotação local da sessão não resolve perda do disco. Estudar uma cópia **criptografada e com uma versão atual + uma cópia anterior de segurança** no armazenamento privado do Telegram, restaurada via sessão MTProto antes do login. A chave de criptografia fica fora da cópia; evitar disponibilizar credenciais ou dados em repositório público. A rotina precisa ser testada e não está implementada.
+6. A recuperação de chat deve ser **idempotente**: duas mensagens simultâneas da mesma pessoa não podem criar dois grupos. Ao detectar um vínculo antigo, reaproveitar em vez de criar. Antes de apagar qualquer cópia de sessão, confirmar que a nova foi salva e pode ser restaurada.
+
+### Aparência e cores dos participantes
+
+- Conversas individuais: um grupo Telegram por contato WhatsApp; título legível com nome e número sem +55 quando disponível, sem emojis adicionados. Uma conversa coletiva do WhatsApp vira um grupo Telegram próprio.
+- Mensagens de grupos devem exibir o nome e o telefone do **remetente real**; a mesma pessoa deve receber identificação consistente em diferentes grupos.
+- **Limitação real:** o Telegram não oferece API para escolher uma cor pastel arbitrária e exclusiva para **cada número**, nem para colorir só o número dentro do título ou corpo da mensagem. Podemos manter internamente uma cor estável por contato como metadado para uso futuro, mas **não prometer exibição colorida** no app oficial. Tampouco há garantia matemática de infinitas cores distintas quando uma paleta é limitada.
+- **Limitação real:** o bot não pode ocultar arbitrariamente a autoria `@Wpp_TBot` das mensagens que publica nos grupos. Mostrar nome/número no conteúdo ou legenda é possível, mas isso não o transforma em remetente nativo. Avaliar opções de apresentação permitidas pelo Telegram, sem simular identidade de terceiros.
+- Fotos: usar foto WhatsApp do contato ou grupo como foto do grupo correspondente no Telegram. **A cada mensagem recebida**, conferir metadados/identificador da foto quando disponível; fazer novo download e atualização da foto **só quando a versão mudou**. Após confirmar upload ao Telegram, apagar cache temporário no servidor. Imagens devem ser reduzidas para tamanho suficiente de avatar, não para resolução original. Para abrir foto ampliada, depender da versão que o Telegram conservar ou solicitar original sob demanda quando permitido pelo WhatsApp.
+- Fotos de remetentes dentro de grupos WhatsApp não se tornam automaticamente avatares distintos de cada mensagem num único bot Telegram; só é possível personalizar a foto do **grupo** e atribuir o autor no texto/legenda.
+
+### Espaço local e política de download
+
+- Limites do Northflank: **256 MB de RAM** para o processo, **1 GB de armazenamento efêmero** para arquivos locais.
+- Proposta de orçamento do disco: até **300 MB** para banco de trabalho, índices, sessões e outros temporários pequenos; até **600 MB** para **soma dos downloads em andamento**, com ~100 MB restantes de folga. **O tamanho deve ser contabilizado antes de aceitar arquivos**, porque o espaço real disponível varia. O orçamento de 300 MB não implica guardar fotos de contatos em alta resolução; preferir fotos armazenadas pelo próprio Telegram.
+- **Não iniciar download de arquivo > 600 MB.** Se a soma dos arquivos simultâneos mais o novo arquivo ultrapassar 600 MB, enfileirar ou responder: “Não foi possível baixar: arquivo maior que 600 MB ou limite de downloads simultâneos ocupado. Aguarde as transferências terminarem.”
+- Para evitar gargalo em 256 MB RAM, priorizar **uma transferência por vez** e envio em partes/arquivo temporário com limites; mídia pesada não pode ficar inteira num `[]byte`. Sempre apagar o temporário após confirmação (ou falha irreversível) e liberar a reserva da fila.
+- WhatsApp -> Telegram: baixar mídia **diretamente dos servidores do WhatsApp através da sessão autenticada**, nunca exigir que o WhatsApp do celular baixe antes. A API usada pode exigir download temporário e novo upload; URL privada de WhatsApp não funciona como URL pública direta no Telegram.
+- **Atenção: a Bot API hospedada do Telegram limita upload normal a 50 MB**. Arquivos até 600 MB exigirão outra modalidade, por exemplo envio via **conta Telegram MTProto** (já necessária para criação dos grupos), ou servidor local Bot API. O plano grátis de 256 MB precisa de testes antes de assumir capacidade para arquivos grandes.
+- Fotos: enviar como fotos com visualização. Vídeos: enviar como vídeos com miniatura/reprodução quando o formato permitir. Documentos: enviar preservando nome e possível miniatura, sem garantir preview para todos os formatos.
+- Depois que a mídia chegar aos **servidores do Telegram**, respeitar download automático/cache do **aplicativo Telegram** do usuário. Não guardar cópias completas nem histórico de conteúdo no Northflank.
+- Mensagens sem mídia devem ir direto sem ocupar a cota de downloads pesados. Ao usar serviço indisponível, não baixar de novo desnecessariamente nem gerar duplicatas ao fazer retry.
+
 ## Andamento
 
 - [x] Fork de trabalho criado.
