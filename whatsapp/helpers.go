@@ -34,6 +34,7 @@ type bridgeContext struct {
 	replyToMsgId int64
 	tgChatID     int64
 	threadId     int64
+	placeholderID int64
 	msgId        string
 	senderStr    string
 	chatStr      string
@@ -49,12 +50,65 @@ func (bc *bridgeContext) savePair(sentMsg *gotgbot.Message) {
 			bc.tgChatID,
 			sentMsg.MessageId, sentMsg.MessageThreadId,
 		)
+		if bc.placeholderID != 0 && bc.placeholderID != sentMsg.MessageId {
+			// The Bot API couldn't convert the original text to this media
+			// type (e.g. native stickers). Delete the waiting notice only
+			// after confirming that the native media was delivered.
+			_, _ = bc.tgBot.DeleteMessage(bc.tgChatID, bc.placeholderID, nil)
+			bc.placeholderID = 0
+		}
 	}
+}
+
+// editPendingMedia uses Telegram's editMessageMedia API to replace the
+// initial waiting notice with the actual photo, video, document or audio.
+// This keeps the original chronological position of incoming WhatsApp media,
+// even when transfers were deferred behind more urgent messages.
+func (bc *bridgeContext) editPendingMedia(media gotgbot.InputMedia) bool {
+	if bc.placeholderID == 0 || bc.tgBot == nil || media == nil {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
+	defer cancel()
+	edited, ok, err := bc.tgBot.EditMessageMediaWithContext(ctx, media,
+		&gotgbot.EditMessageMediaOpts{
+			ChatId: bc.tgChatID, MessageId: bc.placeholderID,
+		})
+	if err != nil || !ok {
+		if bc.logger != nil {
+			bc.logger.Warn("Telegram could not replace media notice in-place",
+				zap.Error(err), zap.Int64("telegram_chat", bc.tgChatID))
+		}
+		return false
+	}
+	originalID := bc.placeholderID
+	bc.placeholderID = 0
+	if edited == nil {
+		edited = &gotgbot.Message{MessageId: originalID}
+	}
+	bc.savePair(edited)
+	return true
 }
 
 // sendFallbackText sends a text-only message (header + extra info) to
 // Telegram and saves the pair. Used when media cannot be sent.
 func (bc *bridgeContext) sendFallbackText(extraText string) {
+	if bc.placeholderID != 0 {
+		// Preserve an immediately registered media record even if WhatsApp
+		// download fails, the file is oversized, or Telegram rejects it.
+		// This notice is not a downloadable file and says so explicitly.
+		text := "Mídia recebida, mas o arquivo não pôde ser enviado agora. " +
+			"Ele continua disponível no WhatsApp, se ainda não tiver expirado."
+		_, ok, err := bc.tgBot.EditMessageText(&gotgbot.EditMessageTextOpts{
+			ChatId: bc.tgChatID, MessageId: bc.placeholderID, Text: text,
+		})
+		if err == nil && ok {
+			id := bc.placeholderID
+			bc.placeholderID = 0
+			bc.savePair(&gotgbot.Message{MessageId: id})
+			return
+		}
+	}
 	sentMsg, _ := bc.tgBot.SendMessage(
 		bc.tgChatID,
 		bc.bridgedText+extraText,
