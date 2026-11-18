@@ -51,12 +51,13 @@ func (bc *bridgeContext) savePair(sentMsg *gotgbot.Message) {
 			sentMsg.MessageId, sentMsg.MessageThreadId,
 		)
 		if bc.placeholderID != 0 && bc.placeholderID != sentMsg.MessageId {
-			// The Bot API couldn't convert the original text to this media
-			// type (e.g. native stickers). Delete the waiting notice only
-			// after confirming that the native media was delivered.
+			// Native stickers can't replace text via editMessageMedia.
 			_, _ = bc.tgBot.DeleteMessage(bc.tgChatID, bc.placeholderID, nil)
 			bc.placeholderID = 0
 		}
+		// Retain the in-flight reservation until the worker finishes, but
+		// mark the notice as delivered so it is not turned into an error.
+		setPendingMedia(bc.chatStr+"\x00"+bc.msgId, mediaPlaceholder{})
 	}
 }
 
