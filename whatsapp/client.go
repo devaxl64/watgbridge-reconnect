@@ -181,8 +181,10 @@ func pairWithQRCode(client *whatsmeow.Client, logger *zap.Logger) error {
 }
 
 // NewWhatsAppClient preserves the upstream behavior for existing deployments.
+// NewWhatsAppClient never launches unattended QR pairing. If a session is
+// missing, the owner initiates phone-code pairing via /codigo instead.
 func NewWhatsAppClient() error {
-	return NewWhatsAppClientWithPairing(false)
+	return NewWhatsAppClientWithPairing(true)
 }
 
 // NewWhatsAppClientWithPairing optionally waits for an explicit /codigo
