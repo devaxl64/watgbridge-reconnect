@@ -2,6 +2,8 @@ package telegram
 
 import (
 	"fmt"
+	"crypto/sha256"
+	"encoding/hex"
 	"html"
 	"strings"
 
@@ -9,6 +11,8 @@ import (
 	"watgbridge/state"
 	"watgbridge/utils"
 	"watgbridge/whatsapp"
+
+	waTypes "go.mau.fi/whatsmeow/types"
 
 	"github.com/PaulSonOfLars/gotgbot/v2"
 	"github.com/PaulSonOfLars/gotgbot/v2/ext"
@@ -87,5 +91,67 @@ func ConversationsCommandHandler(bot *gotgbot.Bot, ctx *ext.Context) error {
 		}
 	}
 	_, err = utils.TgReplyTextByContext(bot, ctx, result, nil, false)
+	return err
+}
+
+// LinkDedicatedGroupHandler is a manual/test fallback while automatic group
+// provisioning via the owner's MTProto session is under development. It never
+// creates groups, never links a Telegram group to two WhatsApp JIDs, and never
+// exposes a full contact number in the Telegram group description.
+func LinkDedicatedGroupHandler(bot *gotgbot.Bot, ctx *ext.Context) error {
+	if ctx.EffectiveSender == nil || ctx.EffectiveSender.User == nil ||
+		ctx.EffectiveSender.User.Id != state.State.Config.Telegram.OwnerID ||
+		ctx.EffectiveChat == nil {
+		return nil
+	}
+	if ctx.EffectiveChat.Type != "supergroup" && ctx.EffectiveChat.Type != "group" {
+		_, err := utils.TgReplyTextByContext(bot, ctx,
+			"Use este comando dentro do grupo do Telegram que será vinculado.", nil, false)
+		return err
+	}
+	if ctx.EffectiveChat.Id == state.State.Config.Telegram.TargetChatID {
+		_, err := utils.TgReplyTextByContext(bot, ctx,
+			"Este é o grupo antigo com tópicos. Crie um grupo separado para este teste.", nil, false)
+		return err
+	}
+	args := ctx.Args()
+	if len(args) != 2 {
+		_, err := utils.TgReplyTextByContext(bot, ctx,
+			"Uso: <code>/vincular 5511999999999</code> ou <code>/vincular 12345@g.us</code>.", nil, false)
+		return err
+	}
+	raw := args[1]
+	if strings.HasPrefix(raw, "+") { raw = raw[1:] }
+	if !strings.Contains(raw, "@") {
+		raw += "@s.whatsapp.net"
+	}
+	jid, err := waTypes.ParseJID(raw)
+	if err != nil || jid.User == "" ||
+		(jid.Server != "s.whatsapp.net" && jid.Server != "g.us" && jid.Server != "lid") {
+		_, replyErr := utils.TgReplyTextByContext(bot, ctx, "Identificador WhatsApp inválido.", nil, false)
+		return replyErr
+	}
+	waChatID := jid.ToNonAD().String()
+	err = database.EnsureSeparateChat(waChatID, ctx.EffectiveChat.Id)
+	if err != nil {
+		return utils.TgReplyWithErrorByContext(bot, ctx,
+			"Vínculo recusado para evitar conversas duplicadas", err)
+	}
+
+	// A non-sensitive fingerprint in the group description will later let
+	// the user MTProto importer find the same group after a local DB loss.
+	sum := sha256.Sum256([]byte(waChatID))
+	tag := "WATGBRIDGE-ID:" + hex.EncodeToString(sum[:12])
+	remoteSaved := false
+	if chat, getErr := bot.GetChat(ctx.EffectiveChat.Id, nil); getErr == nil &&
+		(chat.Description == "" || chat.Description == tag) {
+		remoteSaved, _ = bot.SetChatDescription(ctx.EffectiveChat.Id,
+			&gotgbot.SetChatDescriptionOpts{Description: tag})
+	}
+	msg := "Conversa vinculada. Mensagens dessa conversa poderão usar este grupo do Telegram."
+	if !remoteSaved {
+		msg += "\nA identificação remota não foi atualizada; o bot precisa ser administrador com permissão para editar o grupo."
+	}
+	_, err = utils.TgReplyTextByContext(bot, ctx, msg, nil, false)
 	return err
 }
