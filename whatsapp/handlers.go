@@ -703,7 +703,11 @@ func MessageFromOthersEventHandler(text string, v *events.Message, isEdited bool
 	if cfg.Telegram.SeparateChats {
 		bridgedText = ""
 		if v.Info.IsGroup {
-			name := utils.WaGetContactName(v.Info.MessageSource.Sender)
+			name := groupSenderLabel(
+				utils.WaGetContactName(v.Info.MessageSource.Sender),
+				v.Info.MessageSource.Sender,
+				v.Info.MessageSource.SenderAlt,
+			)
 			bridgedText = "<b>" + html.EscapeString(name) + "</b>: "
 		}
 		if isEdited {
