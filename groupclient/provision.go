@@ -82,14 +82,14 @@ func (m *Manager) Sync(ctx context.Context, maxNew int, botUsername string) (Rep
 		for _,chat:=range chats {
 			if report.Renamed>=2 { break }
 			if ctx.Err()!=nil{return ctx.Err()}
-			if chat.Kind!="private" {continue}
+			if chat.Kind!="private" || state.State.TelegramBot==nil {continue}
+			tgID,linked,lookupErr:=database.TelegramGroupForWhatsApp(chat.WaChatID)
+			if lookupErr!=nil{return lookupErr}
+			if !linked {continue} // do not query 500+ unlinked contact records
 			number:=strings.SplitN(chat.WaChatID,"@",2)[0]
 			name:=strings.TrimSpace(chat.Name)
 			if !humanContactName(name,number) {name=contactDisplayName(chat)}
 			if name=="" {continue}
-			tgID,linked,lookupErr:=database.TelegramGroupForWhatsApp(chat.WaChatID)
-			if lookupErr!=nil{return lookupErr}
-			if !linked || state.State.TelegramBot==nil {continue}
 			remote,lookupErr:=state.State.TelegramBot.GetChat(tgID,nil)
 			if lookupErr!=nil {continue} // no permission: never break creation
 			if !isLegacyNumericTitle(remote.Title,number) {continue}
