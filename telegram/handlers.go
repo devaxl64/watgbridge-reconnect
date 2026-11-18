@@ -40,6 +40,11 @@ type waTgBridgeCommand struct {
 
 var commands = []waTgBridgeCommand{}
 
+func isLinkedSeparateTelegramGroup(chatID int64) bool {
+	_, found, err := database.WhatsAppChatForTelegramGroup(chatID)
+	return found && err == nil
+}
+
 func AddTelegramHandlers() {
 	var (
 		cfg        = state.State.Config
@@ -48,7 +53,8 @@ func AddTelegramHandlers() {
 
 	dispatcher.AddHandlerToGroup(handlers.NewMessage(
 		func(msg *gotgbot.Message) bool {
-			return msg.Chat.Id == cfg.Telegram.TargetChatID
+			return (!cfg.Telegram.SeparateChats && msg.Chat.Id == cfg.Telegram.TargetChatID) ||
+				(cfg.Telegram.SeparateChats && isLinkedSeparateTelegramGroup(msg.Chat.Id))
 		}, BridgeTelegramToWhatsAppHandler,
 	), DispatcherForwardHandlerGroup)
 
@@ -57,7 +63,8 @@ func AddTelegramHandlers() {
 	// so use NewMessage with an EditDate check to catch edited messages.
 	dispatcher.AddHandlerToGroup(handlers.NewMessage(
 		func(msg *gotgbot.Message) bool {
-			return msg.Chat.Id == cfg.Telegram.TargetChatID && msg.EditDate != 0
+			return (!cfg.Telegram.SeparateChats && msg.Chat.Id == cfg.Telegram.TargetChatID) ||
+				(cfg.Telegram.SeparateChats && isLinkedSeparateTelegramGroup(msg.Chat.Id)) && msg.EditDate != 0
 		}, BridgeTelegramEditedToWhatsAppHandler,
 	).SetAllowEdited(true), DispatcherForwardHandlerGroup)
 
@@ -221,7 +228,11 @@ func BridgeTelegramToWhatsAppHandler(b *gotgbot.Bot, c *ext.Context) error {
 			waMsgId, participantID, targetWaChatID, err := database.MsgIdGetWaFromTg(c.EffectiveChat.Id, tgPinnedMsgId, msgToForward.MessageThreadId)
 			if err == nil && waMsgId != "" {
 				if targetWaChatID == "" {
-					targetWaChatID, _ = database.ChatThreadGetWaFromTg(c.EffectiveChat.Id, msgToForward.MessageThreadId)
+					if state.State.Config.Telegram.SeparateChats {
+						targetWaChatID, _, _ = database.WhatsAppChatForTelegramGroup(c.EffectiveChat.Id)
+					} else {
+						targetWaChatID, _ = database.ChatThreadGetWaFromTg(c.EffectiveChat.Id, msgToForward.MessageThreadId)
+					}
 				}
 				if targetWaChatID != "" {
 					waChatJID, ok := utils.WaParseJID(targetWaChatID)
@@ -269,6 +280,16 @@ func BridgeTelegramToWhatsAppHandler(b *gotgbot.Bot, c *ext.Context) error {
 			waChatID = participantID
 		}
 		quotedWaChatID = waChatID
+	} else if state.State.Config.Telegram.SeparateChats {
+		var found bool
+		waChatID, found, err = database.WhatsAppChatForTelegramGroup(c.EffectiveChat.Id)
+		if err != nil {
+			return utils.TgReplyWithErrorByContext(b, c, "Falha ao recuperar conversa do WhatsApp", err)
+		}
+		if !found {
+			return utils.TgReplyWithErrorByContext(b, c, "Conversa sem vínculo",
+				errors.New("nenhum WhatsApp vinculado a este grupo"))
+		}
 	} else {
 		waChatID, err = database.ChatThreadGetWaFromTg(c.EffectiveChat.Id, c.EffectiveMessage.MessageThreadId)
 		if err != nil {
