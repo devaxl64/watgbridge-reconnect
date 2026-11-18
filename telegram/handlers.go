@@ -82,6 +82,10 @@ func AddTelegramHandlers() {
 			"Ver conversas do WhatsApp identificadas pela sincronização",
 		},
 		waTgBridgeCommand{
+			handlers.NewCommand("vincular", LinkDedicatedGroupHandler),
+			"Vincular grupo Telegram a uma conversa WhatsApp (teste)",
+		},
+		waTgBridgeCommand{
 			handlers.NewCommand("findcontact", FindContactHandler),
 			"Fuzzy find contact JIDs from names in WhatsApp",
 		},
