@@ -800,6 +800,7 @@ func MessageFromOthersEventHandler(text string, v *events.Message, isEdited bool
 		bridgedText:  bridgedText,
 		replyToMsgId: replyToMsgId,
 		threadId:     threadId,
+		placeholderID: mediaPlaceholderFor(v).messageID,
 		msgId:        msgId,
 		senderStr:    v.Info.MessageSource.Sender.String(),
 		chatStr:      v.Info.Chat.String(),
@@ -874,6 +875,12 @@ func (bc *bridgeContext) handleImageMessage(v *events.Message) {
 		if strings.EqualFold(imageMsg.GetMimetype(), "image/png") {
 			fileName = "image.png"
 		}
+		if bc.editPendingMedia(gotgbot.InputMediaDocument{
+			Media: &gotgbot.FileReader{Name: fileName, Data: imageFile},
+			Caption: bc.bridgedText, ParseMode: "HTML",
+		}) {
+			return
+		}
 		sentMsg, _ := bc.tgBot.SendDocument(bc.tgChatID,
 			&gotgbot.FileReader{Name: fileName, Data: imageFile},
 			&gotgbot.SendDocumentOpts{
@@ -885,6 +892,13 @@ func (bc *bridgeContext) handleImageMessage(v *events.Message) {
 		return
 	}
 
+	if bc.editPendingMedia(gotgbot.InputMediaPhoto{
+		Media: &gotgbot.FileReader{Name: "image.jpg", Data: imageFile},
+		Caption: bc.bridgedText, ParseMode: "HTML",
+		HasSpoiler: imageMsg.GetViewOnce(),
+	}) {
+		return
+	}
 	sentMsg, _ := bc.tgBot.SendPhoto(bc.tgChatID,
 		&gotgbot.FileReader{Data: imageFile},
 		&gotgbot.SendPhotoOpts{
@@ -920,6 +934,12 @@ func (bc *bridgeContext) handleGifMessage(v *events.Message) {
 
 	addCaption(&bc.bridgedText, gifMsg.GetCaption())
 
+	if bc.editPendingMedia(gotgbot.InputMediaAnimation{
+		Media: &gotgbot.FileReader{Name: "animation.mp4", Data: gifFile},
+		Caption: bc.bridgedText, ParseMode: "HTML",
+	}) {
+		return
+	}
 	sentMsg, _ := bc.tgBot.SendAnimation(bc.tgChatID,
 		&gotgbot.FileReader{Name: "animation.mp4", Data: gifFile},
 		&gotgbot.SendAnimationOpts{
@@ -967,6 +987,12 @@ func (bc *bridgeContext) handleVideoMessage(v *events.Message) {
 		Data: videoFile,
 	}
 
+	if !isPTV && bc.editPendingMedia(gotgbot.InputMediaVideo{
+		Media: &fileToSend, Caption: bc.bridgedText,
+		ParseMode: "HTML", HasSpoiler: videoMsg.GetViewOnce(),
+	}) {
+		return
+	}
 	var sentMsg *gotgbot.Message
 	if isPTV {
 		sentMsg, _ = bc.tgBot.SendVideoNote(bc.tgChatID, &fileToSend,
@@ -1009,6 +1035,13 @@ func (bc *bridgeContext) handleVoiceNoteMessage(v *events.Message) {
 	}
 	defer releaseMedia()
 
+	if bc.editPendingMedia(gotgbot.InputMediaAudio{
+		Media: &gotgbot.FileReader{Name: "audio.ogg", Data: audioFile},
+		Caption: bc.bridgedText, ParseMode: "HTML",
+		Duration: int64(audioMsg.GetSeconds()),
+	}) {
+		return
+	}
 	sentMsg, _ := bc.tgBot.SendAudio(bc.tgChatID,
 		&gotgbot.FileReader{Name: "audio.ogg", Data: audioFile},
 		&gotgbot.SendAudioOpts{
@@ -1042,6 +1075,13 @@ func (bc *bridgeContext) handleAudioMessage(v *events.Message) {
 	}
 	defer releaseMedia()
 
+	if bc.editPendingMedia(gotgbot.InputMediaAudio{
+		Media: &gotgbot.FileReader{Name: "audio.m4a", Data: audioFile},
+		Caption: bc.bridgedText, ParseMode: "HTML",
+		Duration: int64(audioMsg.GetSeconds()),
+	}) {
+		return
+	}
 	sentMsg, _ := bc.tgBot.SendAudio(bc.tgChatID,
 		&gotgbot.FileReader{Name: "audio.m4a", Data: audioFile},
 		&gotgbot.SendAudioOpts{
@@ -1077,6 +1117,12 @@ func (bc *bridgeContext) handleDocumentMessage(v *events.Message) {
 
 	addCaption(&bc.bridgedText, documentMsg.GetCaption())
 
+	if bc.editPendingMedia(gotgbot.InputMediaDocument{
+		Media: &gotgbot.FileReader{Name: documentMsg.GetFileName(), Data: documentFile},
+		Caption: bc.bridgedText, ParseMode: "HTML",
+	}) {
+		return
+	}
 	sentMsg, _ := bc.tgBot.SendDocument(bc.tgChatID,
 		&gotgbot.FileReader{Name: documentMsg.GetFileName(), Data: documentFile},
 		&gotgbot.SendDocumentOpts{
@@ -1116,6 +1162,12 @@ func (bc *bridgeContext) handleStickerMessage(v *events.Message) {
 			if _, ext, ok := strings.Cut(mimeType, "/"); ok && ext != "" {
 				stickerExt = ext
 			}
+		}
+		if bc.editPendingMedia(gotgbot.InputMediaDocument{
+			Media: &gotgbot.FileReader{Name: "sticker." + stickerExt, Data: bytes.NewReader(stickerBytes)},
+			Caption: bc.bridgedText, ParseMode: "HTML",
+		}) {
+			return
 		}
 		sentMsg, _ := bc.tgBot.SendDocument(bc.tgChatID,
 			&gotgbot.FileReader{Name: "sticker." + stickerExt, Data: bytes.NewReader(stickerBytes)},
