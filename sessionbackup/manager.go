@@ -87,7 +87,7 @@ func (m *Manager) Save(ctx context.Context) error {
 
 // RunPeriodicBackup keeps a single backup worker active, without storing
 // copies indefinitely on the Northflank container. Call with a live WA session.
-func (m *Manager) RunPeriodicBackup(ctx context.Context, interval time.Duration, report func(error)) {
+func (m *Manager) RunPeriodicBackup(ctx context.Context, interval time.Duration, shouldBackup func() bool, report func(error)) {
 	if m == nil {
 		return
 	}
@@ -104,6 +104,9 @@ func (m *Manager) RunPeriodicBackup(ctx context.Context, interval time.Duration,
 		case <-initial.C:
 		}
 		tryBackup := func() {
+			if shouldBackup != nil && !shouldBackup() {
+				return
+			}
 			opCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
 			defer cancel()
 			if err := m.Save(opCtx); err != nil && report != nil {
