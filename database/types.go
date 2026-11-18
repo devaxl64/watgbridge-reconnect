@@ -64,6 +64,7 @@ func AutoMigrate() error {
 		&MsgIdPair{},
 		&ChatThreadPair{},
 		&ChatRoute{},
+		&KnownChat{},
 		&ContactName{},
 		&ChatEphemeralSettings{},
 		&MessageReceipt{},
