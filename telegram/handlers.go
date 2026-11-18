@@ -795,15 +795,16 @@ func PairWhatsAppByPhoneCodeHandler(b *gotgbot.Bot, c *ext.Context) error {
 			"Já existe uma sessão vinculada. Use /status ou /reconectar.", nil, false)
 		return err
 	}
-	// An expired pairing attempt may have left an unauthenticated socket open.
-	// Reconnect cleanly before requesting a new QR stream.
-	if client.IsConnected() {
-		client.Disconnect()
-	}
 	if !phonePairingActive.CompareAndSwap(false, true) {
 		_, err := utils.TgReplyTextByContext(b, c,
 			"Já há um código de vinculação ativo. Aguarde sua expiração.", nil, false)
 		return err
+	}
+
+	// An expired pairing attempt may have left an unauthenticated socket open.
+	// Only the command holding the pairing lock may disconnect it.
+	if client.IsConnected() {
+		client.Disconnect()
 	}
 
 	// The QR code stream must be drained for PairPhone to work, but QR images
@@ -982,6 +983,12 @@ func RestartBotHandler(b *gotgbot.Bot, c *ext.Context) error {
 func NewQRHandler(b *gotgbot.Bot, c *ext.Context) error {
 	if !utils.TgUpdateIsAuthorized(b, c) {
 		return nil
+	}
+	if os.Getenv("WATG_BACKUP_KEY") != "" {
+		_, err := utils.TgReplyTextByContext(b, c,
+			"O modo de recuperação segura está ativo. Não vou apagar sua sessão. "+
+				"Use /reconectar; se a sessão foi perdida, use /codigo 55DDDNÚMERO no privado.", nil, false)
+		return err
 	}
 
 	waClient := state.State.WhatsAppClient
