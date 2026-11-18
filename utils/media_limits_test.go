@@ -29,9 +29,9 @@ func TestTgOutgoingMediaLimitNoticeAllTypes(t *testing.T) {
 			}
 			for _, selfHosted := range []bool{false, true} {
 				msg := TgOutgoingMediaLimitNotice(tc.msg, selfHosted)
-				if !strings.Contains(msg, "Limite de envio: 50 MB") ||
-					!strings.Contains(msg, "(arquivo: 51,0 MB)") ||
-					!strings.Contains(msg, "Nada foi enviado ao WhatsApp.") {
+				if !strings.Contains(msg, "Não foi possível baixar o arquivo") ||
+					!strings.Contains(msg, "(51,0 MB)") ||
+					!strings.Contains(msg, "Limite configurado: 50 MB.") {
 					t.Fatalf("missing local 50 MB rejection: %q", msg)
 				}
 			}
@@ -42,9 +42,9 @@ func TestTgOutgoingMediaLimitNoticeAllTypes(t *testing.T) {
 func TestTgOutgoingMediaLimitNoticeHostedDownloadLimit(t *testing.T) {
 	msg := &gotgbot.Message{Document: &gotgbot.Document{FileSize: 25 * 1024 * 1024, FileName: "video.mp4", MimeType: "video/mp4"}}
 	notice := TgOutgoingMediaLimitNotice(msg, false)
-	if !strings.Contains(notice, "até 20 MB") ||
-		!strings.Contains(notice, "(arquivo: 25,0 MB)") ||
-		!strings.Contains(notice, "Nada foi enviado ao WhatsApp.") {
+	if !strings.Contains(notice, "Limite do bot: 20 MB.") ||
+		!strings.Contains(notice, "(25,0 MB)") ||
+		!strings.Contains(notice, "Limite configurado: 50 MB.") {
 		t.Fatalf("did not explain hosted download limit: %q", notice)
 	}
 	if got := TgOutgoingMediaLimitNotice(msg, true); got != "" {
