@@ -5,6 +5,10 @@ on:
     paths:
       - 'database/**'
       - 'transfer/**'
+      - 'sessionbackup/**'
+      - 'telegram/**'
+      - 'whatsapp/**'
+      - 'main.go'
       - 'go.mod'
       - 'go.sum'
       - '.github/workflows/test-separate-chats.yml'
@@ -19,4 +23,6 @@ jobs:
         with:
           go-version-file: go.mod
       - name: Run routing tests
-        run: go test ./database ./transfer
+        run: go test ./database ./transfer ./sessionbackup
+      - name: Compile the complete bridge
+        run: go build ./...
