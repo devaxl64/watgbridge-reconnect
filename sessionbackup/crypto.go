@@ -21,7 +21,7 @@ const (
 	Magic = "WATG-BK1"
 	// Telegram Bot API getFile is limited to 20 MB: stay below it.
 	MaxEncryptedSize = 18 * 1024 * 1024
-	MaxPlainFileSize = 48 * 1024 * 1024
+	MaxPlainFileSize = 12 * 1024 * 1024
 )
 
 var expectedFiles = []string{"wawebstore.db", "gobot.sqlite.db"}
