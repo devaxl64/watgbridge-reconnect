@@ -57,7 +57,7 @@ func (bc *bridgeContext) savePair(sentMsg *gotgbot.Message) {
 		}
 		// Retain the in-flight reservation until the worker finishes, but
 		// mark the notice as delivered so it is not turned into an error.
-		setPendingMedia(bc.chatStr+"\x00"+bc.msgId, mediaPlaceholder{})
+		markPendingMediaDelivered(bc.chatStr+"\x00"+bc.msgId)
 	}
 }
 
