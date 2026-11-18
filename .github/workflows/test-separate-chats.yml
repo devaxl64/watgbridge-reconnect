@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - 'database/**'
+      - 'transfer/**'
       - 'go.mod'
       - 'go.sum'
       - '.github/workflows/test-separate-chats.yml'
@@ -18,4 +19,4 @@ jobs:
         with:
           go-version-file: go.mod
       - name: Run routing tests
-        run: go test ./database
+        run: go test ./database ./transfer
