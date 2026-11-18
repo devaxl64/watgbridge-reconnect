@@ -43,6 +43,52 @@ func bindSeparateChat(db *gorm.DB, waChatID string, tgChatID int64) error {
 	})
 }
 
+// ErrWhatsAppAlreadyLinked prevents automated provisioning from silently
+// moving a WhatsApp conversation to a newly created Telegram group.
+var ErrWhatsAppAlreadyLinked = errors.New("WhatsApp chat already linked to a Telegram group")
+
+// EnsureSeparateChat creates a route only if neither side is already linked.
+// Unlike BindSeparateChat (explicit migration operation), it will NEVER
+// replace an existing WhatsApp association. Concurrent retries are safe.
+func EnsureSeparateChat(waChatID string, tgChatID int64) error {
+	return ensureSeparateChat(state.State.Database, waChatID, tgChatID)
+}
+
+func ensureSeparateChat(db *gorm.DB, waChatID string, tgChatID int64) error {
+	waChatID = strings.TrimSpace(waChatID)
+	if db == nil || waChatID == "" || tgChatID == 0 {
+		return errors.New("chat route needs a database and both chat IDs")
+	}
+	return db.Transaction(func(tx *gorm.DB) error {
+		var byWhatsApp ChatRoute
+		err := tx.Where("wa_chat_id = ?", waChatID).First(&byWhatsApp).Error
+		if err == nil {
+			if byWhatsApp.TgChatID == tgChatID {
+				return nil // exact existing mapping is idempotent
+			}
+			return fmt.Errorf("%w: %s", ErrWhatsAppAlreadyLinked, waChatID)
+		}
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+
+		var byTelegram ChatRoute
+		err = tx.Where("tg_chat_id = ?", tgChatID).First(&byTelegram).Error
+		if err == nil {
+			return fmt.Errorf("%w: %d", ErrChatAlreadyLinked, tgChatID)
+		}
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+		if err := tx.Create(&ChatRoute{WaChatID: waChatID, TgChatID: tgChatID}).Error; err != nil {
+			// A concurrent insert may have claimed one of these keys first.
+			// Never overwrite it.
+			return fmt.Errorf("failed to reserve unique chat route: %w", err)
+		}
+		return nil
+	})
+}
+
 // TelegramGroupForWhatsApp returns the dedicated Telegram group, if linked.
 func TelegramGroupForWhatsApp(waChatID string) (int64, bool, error) {
 	return telegramGroupForWhatsApp(state.State.Database, waChatID)
